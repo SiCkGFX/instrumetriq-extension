@@ -143,34 +143,10 @@ extension/           Extension source (popup, background worker, content script)
 scripts/
   build_payload.py   Computes all metrics from per-coin CSVs, writes the JSON payload
   build_zip.py       Builds distributable .zip files for Chrome and Firefox
-nginx/               Server config template (bearer token placeholder only)
+nginx/               Server config template
 METHODOLOGY.md       Full methodology documentation
 CHANGELOG.md         Release history
 ```
-
----
-
-## Building from source
-
-The extension requires a bearer token for the data endpoint. Create
-`extension/secrets.js` (this file is gitignored and never committed):
-
-```js
-const BEARER_TOKEN = "your-token-here";
-```
-
-Then build:
-
-```bash
-python3 scripts/build_zip.py --target chrome    # Chrome (default)
-python3 scripts/build_zip.py --target firefox   # Firefox
-python3 scripts/build_zip.py --target all       # Both
-```
-
-Output: `instrumetriq-chrome.zip` and/or `instrumetriq-firefox.zip` in the repo root.
-
-The build script bundles `secrets.js`, `extensionpay.js`, and `background.js` into a
-single file so the zip works without `importScripts`.
 
 ---
 
