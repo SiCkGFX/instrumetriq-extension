@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Instrumetriq",
-  "version": "1.0.1",
+  "name": "Instrumetriq - Crypto Sentiment & Market Pulse",
+  "version": "1.0.2",
   "description": "X (Twitter) chatter indicators for crypto. See what's being said about any coin, right now.",
 
   "action": {
