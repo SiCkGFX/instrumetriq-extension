@@ -29,6 +29,8 @@ docs/
 
 # ── Source assets not needed in repo ─────────────────────────────────────────
 extension/icons/instrumetriq-avatar.jpg
+extension/icons/Screenshot*
+promo-tile-*.jpg
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
