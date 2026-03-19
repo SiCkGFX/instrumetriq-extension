@@ -1,0 +1,84 @@
+{
+  "manifest_version": 3,
+  "name": "Instrumetriq",
+  "version": "1.0.0",
+  "description": "X (Twitter) chatter indicators for crypto. See what's being said about any coin, right now.",
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "permissions": [
+    "alarms",
+    "storage",
+    "notifications",
+    "activeTab",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "https://api.instrumetriq.com/*",
+    "https://extensionpay.com/*"
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["extensionpay.js"],
+      "matches": ["https://extensionpay.com/*"]
+    }
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["https://extensionpay.com/*"],
+      "js": ["extensionpay.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.binance.com/en/trade/*",
+        "*://*.binance.com/en/futures/*",
+        "*://*.tradingview.com/chart/*",
+        "*://*.bybit.com/trade/*",
+        "*://*.okx.com/trade-spot/*",
+        "*://*.coinbase.com/advanced-trade/*",
+        "*://pro.kraken.com/app/trade/*",
+        "*://*.bitget.com/spot/*",
+        "*://*.kucoin.com/trade/*",
+        "*://*.gate.com/trade/*",
+        "*://*.gate.io/trade/*",
+        "*://*.mexc.com/exchange/*",
+        "*://*.htx.com/trade/*",
+        "*://*.crypto.com/exchange/trade/*",
+        "*://*.phemex.com/spot/trade/*",
+        "*://*.bingx.com/*/spot/*",
+        "*://trading.bitfinex.com/t/*",
+        "*://*.dydx.exchange/trade/*",
+        "*://*.coingecko.com/*/coins/*",
+        "*://*.coinmarketcap.com/currencies/*",
+        "*://*.coindesk.com/price/*",
+        "*://*.cryptocompare.com/coins/*",
+        "*://*.messari.io/project/*",
+        "*://*.defillama.com/protocol/*",
+        "*://*.kraken.com/prices/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <title>Instrumetriq</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- ── Header: badge mode + notifications ──────────────────────────── -->
+  <header class="header">
+    <div class="toggle-group">
+      <div class="pill-toggle">
+        <div class="pill-option active" data-tooltip="Badge reflects activity on your tracked coins only.">My coins</div>
+        <div class="pill-option" data-tooltip="Badge reflects activity across all 278 tracked coins.">All coins</div>
+      </div>
+    </div>
+    <div class="toggle-group">
+      <div class="switch-toggle off" data-tooltip="Get a browser notification when any of your tracked coins starts Buzzing or Spiking. One alert per update cycle - never spam.">
+        <div class="switch-knob"></div>
+      </div>
+      <span class="switch-label">Alerts</span>
+    </div>
+    <div class="toggle-group">
+      <div class="theme-toggle" id="theme-toggle" data-tooltip="Switch between dark, light, or auto (OS) theme.">
+        <button class="theme-btn" data-theme-value="light" aria-label="Light theme">&#x2600;</button>
+        <button class="theme-btn active" data-theme-value="auto" aria-label="Auto theme">A</button>
+        <button class="theme-btn" data-theme-value="dark" aria-label="Dark theme">&#x263E;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Coin navigation bar ──────────────────────────────────── -->
+  <nav class="coin-nav">
+    <button class="nav-arrow" id="nav-prev" data-tooltip="Previous coin">&#x2039;</button>
+    <div class="nav-center">
+      <span class="nav-coin-name">BTC</span>
+      <div class="nav-tracking-row">
+        <span class="nav-counter" id="nav-counter">1 / 2</span>
+        <button class="nav-edit-btn" id="nav-edit-btn" data-tooltip="Manage tracked coins">Edit</button>
+      </div>
+    </div>
+    <div class="nav-right">
+      <button class="nav-refresh-btn" id="nav-refresh-btn" data-tooltip="Fetch latest data (10s cooldown)">&#x21BB;</button>
+      <button class="nav-search-btn" id="nav-search-btn" data-tooltip="Search coins">&#x2315;</button>
+      <button class="nav-arrow" id="nav-next" data-tooltip="Next coin">&#x203A;</button>
+    </div>
+  </nav>
+
+  <!-- Search bar: hidden by default, toggled by search icon -->
+  <div class="coin-search-bar hidden">
+    <input class="coin-search-input" id="coin-search-input" type="text" placeholder="Type a coin symbol..." autocomplete="off" />
+    <div class="search-dropdown hidden" id="search-dropdown"></div>
+  </div>
+
+  <!-- ── Card area: populated by popup.js ──────────────────────────── -->
+  <div class="card-area" id="card-area"></div>
+
+
+  <!-- ── Plan choice panel (hidden until upgrade click) ─────────── -->
+  <div class="plan-choice hidden" id="plan-choice">
+    <p class="plan-choice-title">Choose your plan</p>
+    <div class="plan-choice-options">
+      <button class="plan-btn" data-plan="pro_monthly">
+        <span class="plan-price">$5 / month</span>
+      </button>
+      <button class="plan-btn plan-btn-best" data-plan="pro_yearly">
+        <span class="plan-price">$45 / year</span>
+        <span class="plan-save">save 25%</span>
+      </button>
+    </div>
+    <button class="plan-choice-close" id="plan-choice-close">Cancel</button>
+  </div>
+
+  <!-- ── Footer ───────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer-col footer-col-left">
+      <p class="footer-active-count">7 coins are Spiking right now.</p>
+      <a class="footer-cta" href="#">Unlock all 257 &#x2192;</a>
+      <a class="footer-restore hidden" href="#">Already paid? Restore</a>
+    </div>
+    <div class="footer-col footer-col-right">
+      <span class="footer-powered">Powered by <a href="#" class="footer-brand-link" id="footer-brand-link">instrumetriq</a></span>
+      <div class="footer-links-row">
+        <a href="#" class="footer-privacy-link" id="footer-methodology-link">How it works</a>
+        <a href="#" class="footer-privacy-link" id="footer-sites-link">Supported sites</a>
+        <a href="#" class="footer-privacy-link" id="footer-privacy-link">Privacy</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ── Onboarding overlay: shown on first install ─────────────────── -->
+  <div class="overlay-panel hidden" id="onboarding-panel">
+    <div class="overlay-inner">
+      <div class="overlay-logo"><img src="icons/instrumetriq-logo.svg" alt="Instrumetriq" height="28"></div>
+      <h1 class="overlay-title">Welcome to Instrumetriq</h1>
+      <p class="overlay-body">See what the crowd on X (Twitter) is saying about any crypto coin - and how derivatives traders are positioned - all while you're on your trading page.</p>
+      <ul class="overlay-feature-list">
+        <li><strong>Chatter level</strong> - is this coin Quiet, Active, Buzzing, or Spiking vs its own 30-day average?</li>
+        <li><strong>Chatter tone</strong> - how this coin's sentiment compares to its own 30-day average. Shows whether the mood has shifted.</li>
+        <li><strong>Funding, OI flow, Whale lean</strong> - how derivatives traders are positioned right now.</li>
+        <li><strong>Context-aware</strong> - opens to the coin you're looking at on Binance, TradingView, or Bybit.</li>
+      </ul>
+      <div class="overlay-disclaimer">
+        <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action. Always do your own research.
+      </div>
+      <p class="overlay-subtext">Data updates every ~3 hours. Free tier: 2 coins. Pro: all 257 coins.</p>
+      <button class="overlay-cta-btn" id="onboarding-continue">Choose my coins &rarr;</button>
+    </div>
+  </div>
+
+  <!-- ── Supported sites panel ────────────────────────────────────── -->
+  <div class="overlay-panel hidden" id="sites-panel">
+    <div class="overlay-inner">
+      <div class="overlay-header-row">
+        <h1 class="overlay-title">Supported sites</h1>
+        <button class="overlay-close-btn" id="sites-close">&#x2715;</button>
+      </div>
+      <p class="overlay-body">When you open one of these pages, Instrumetriq automatically highlights the relevant coin.</p>
+      <p class="overlay-section-label">Trading platforms</p>
+      <ul class="overlay-sites-list">
+        <li>Binance <a href="https://www.binance.com" target="_blank" rel="noopener" class="overlay-site-domain">binance.com</a></li>
+        <li>Bybit <a href="https://www.bybit.com" target="_blank" rel="noopener" class="overlay-site-domain">bybit.com</a></li>
+        <li>OKX <a href="https://www.okx.com" target="_blank" rel="noopener" class="overlay-site-domain">okx.com</a></li>
+        <li>Coinbase Advanced <a href="https://www.coinbase.com" target="_blank" rel="noopener" class="overlay-site-domain">coinbase.com</a></li>
+        <li>Kraken Pro <a href="https://pro.kraken.com" target="_blank" rel="noopener" class="overlay-site-domain">pro.kraken.com</a></li>
+        <li>Bitget <a href="https://www.bitget.com" target="_blank" rel="noopener" class="overlay-site-domain">bitget.com</a></li>
+        <li>KuCoin <a href="https://www.kucoin.com" target="_blank" rel="noopener" class="overlay-site-domain">kucoin.com</a></li>
+        <li>Gate.io <a href="https://www.gate.io" target="_blank" rel="noopener" class="overlay-site-domain">gate.io</a></li>
+        <li>MEXC <a href="https://www.mexc.com" target="_blank" rel="noopener" class="overlay-site-domain">mexc.com</a></li>
+        <li>HTX <a href="https://www.htx.com" target="_blank" rel="noopener" class="overlay-site-domain">htx.com</a></li>
+        <li>Crypto.com Exchange <a href="https://crypto.com" target="_blank" rel="noopener" class="overlay-site-domain">crypto.com</a></li>
+        <li>Phemex <a href="https://www.phemex.com" target="_blank" rel="noopener" class="overlay-site-domain">phemex.com</a></li>
+        <li>BingX <a href="https://www.bingx.com" target="_blank" rel="noopener" class="overlay-site-domain">bingx.com</a></li>
+        <li>Bitfinex <a href="https://www.bitfinex.com" target="_blank" rel="noopener" class="overlay-site-domain">bitfinex.com</a></li>
+        <li>dYdX <a href="https://dydx.trade" target="_blank" rel="noopener" class="overlay-site-domain">dydx.trade</a></li>
+        <li>TradingView <a href="https://www.tradingview.com" target="_blank" rel="noopener" class="overlay-site-domain">tradingview.com</a></li>
+      </ul>
+      <p class="overlay-section-label">Info &amp; analytics</p>
+      <ul class="overlay-sites-list">
+        <li>CoinGecko <a href="https://www.coingecko.com" target="_blank" rel="noopener" class="overlay-site-domain">coingecko.com</a></li>
+        <li>CoinMarketCap <a href="https://coinmarketcap.com" target="_blank" rel="noopener" class="overlay-site-domain">coinmarketcap.com</a></li>
+        <li>CoinDesk <a href="https://www.coindesk.com" target="_blank" rel="noopener" class="overlay-site-domain">coindesk.com</a></li>
+        <li>CryptoCompare <a href="https://www.cryptocompare.com" target="_blank" rel="noopener" class="overlay-site-domain">cryptocompare.com</a></li>
+        <li>Messari <a href="https://messari.io" target="_blank" rel="noopener" class="overlay-site-domain">messari.io</a></li>
+        <li>DeFiLlama <a href="https://defillama.com" target="_blank" rel="noopener" class="overlay-site-domain">defillama.com</a></li>
+        <li>Kraken Prices <a href="https://www.kraken.com/prices" target="_blank" rel="noopener" class="overlay-site-domain">kraken.com/prices</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Privacy policy panel ──────────────────────────────────────── -->
+  <div class="overlay-panel hidden" id="privacy-panel">
+    <div class="overlay-inner">
+      <div class="overlay-header-row">
+        <h1 class="overlay-title">Privacy Policy</h1>
+        <button class="overlay-close-btn" id="privacy-close">&#x2715;</button>
+      </div>
+      <ul class="overlay-privacy-list">
+        <li><strong>No user data collected.</strong> We do not collect, store, or transmit any personal information, browsing history, or trading activity.</li>
+        <li><strong>URL-only detection.</strong> The extension reads coin symbols from trading page URLs only (e.g. binance.com/en/trade/BTC_USDT). It does not access page content, DOM, or any data you enter on those pages.</li>
+        <li><strong>Local storage only.</strong> Your coin preferences and settings are stored locally in your browser using <code>chrome.storage.local</code>. They never leave your device.</li>
+        <li><strong>Data feed.</strong> The extension fetches a shared, anonymous JSON file from api.instrumetriq.com. No user identifier is sent with this request.</li>
+        <li><strong>Payments.</strong> Subscription payments are handled entirely by Stripe via ExtensionPay. We do not see or store your payment details. ExtensionPay's privacy policy applies to payment processing.</li>
+        <li><strong>No tracking, no analytics.</strong> We do not use any analytics, crash reporting, or advertising SDKs.</li>
+      </ul>
+      <p class="overlay-body">Contact: <a href="mailto:contact@instrumetriq.com" class="overlay-link">contact@instrumetriq.com</a></p>
+    </div>
+  </div>
+
+  <!-- ── How it works panel ────────────────────────────────────────── -->
+  <div class="overlay-panel hidden" id="methodology-panel">
+    <div class="overlay-inner">
+      <div class="overlay-header-row">
+        <h1 class="overlay-title">How it works</h1>
+        <button class="overlay-close-btn" id="methodology-close">&#x2715;</button>
+      </div>
+
+      <p class="overlay-section-label">The chart</p>
+      <p class="overlay-body">Each bar on the chart represents one data cycle (between every 2-4 hours). A taller bar means the coin received more engagement (likes, retweets, reach) during that cycle.</p>
+      <p class="overlay-body">The bar color shows the tone shift: <strong class="tone-positive">green</strong> when sentiment is more positive than usual for this coin (shift above +8), <strong class="tone-negative">red</strong> when more negative than usual (shift below -8), and <strong class="tone-mixed">grey</strong> when near the coin's own baseline or when data is insufficient.</p>
+
+      <p class="overlay-section-label">Chart timeframes</p>
+      <p class="overlay-body">Use the <strong>C / D / W</strong> buttons above the chart to switch between three views of the same underlying data:</p>
+      <ul class="overlay-privacy-list">
+        <li><strong>C (Cycle)</strong> - one bar per data cycle, covering the last 7 days. This is the most granular view and the default.</li>
+        <li><strong>D (Day)</strong> - one bar per calendar day, covering the last 30 days. Each bar is the average engagement for that day. Today's bar updates with each new cycle.</li>
+        <li><strong>W (Week)</strong> - one bar per week, covering the last 4 weeks. Each bar is the average engagement across a full 7-day window.</li>
+      </ul>
+      <p class="overlay-body">All three views use a rolling window anchored to today, so the chart always shows the most recent data available.</p>
+
+      <p class="overlay-section-label">Engagement Coefficient (EC)</p>
+      <p class="overlay-body">For each cycle we calculate an <strong>Engagement Coefficient</strong> - a single number that captures how much attention a coin is getting on X (Twitter).</p>
+      <p class="overlay-body" style="text-align:center; font-size:13px;"><strong>EC = (likes + retweets) x log(follower reach) / posts</strong></p>
+      <ul class="overlay-privacy-list">
+        <li>We add up the <strong>likes</strong> and <strong>retweets</strong> from all posts about this coin in the cycle.</li>
+        <li>We weigh that by the <strong>follower reach</strong> of the people posting - a post from a large account counts more than the same post from a tiny one.</li>
+        <li>We divide by the <strong>number of posts</strong> so a coin with 5 very popular posts scores higher than one with 50 posts that nobody noticed.</li>
+      </ul>
+      <p class="overlay-body">In short: <em>EC tells you how much engagement each post is getting, adjusted for the audience size of the people talking.</em></p>
+
+      <p class="overlay-section-label">Why the chart uses a log scale</p>
+      <p class="overlay-body">A coin can fluctuate between EC 0 (nobody talked about it) and EC 20,000+ (a viral spike) across the same chart. If we drew the bars on a plain linear scale, a single spike would make every other bar invisible.</p>
+      <p class="overlay-body">Instead, we compress the bars using a <strong>logarithmic scale</strong>. Think of it like a volume knob: the difference between silence and a whisper is clearly visible, while the difference between loud and very loud is still shown, but does not wipe out everything else.</p>
+      <ul class="overlay-privacy-list">
+        <li><strong>Zero stays flat</strong> - if nobody talked about the coin, the bar is empty.</li>
+        <li><strong>Small values are visible</strong> - a quiet cycle still shows as a short bar.</li>
+        <li><strong>Huge spikes are tall but proportional</strong> - a viral moment is the tallest bar, but smaller bars remain readable.</li>
+      </ul>
+
+      <p class="overlay-section-label">Chatter level labels</p>
+      <p class="overlay-body">The label on each card (Quiet, Active, Buzzing, Spiking) compares the latest EC to this coin's own <strong>30-day average</strong>. Think of it as "how talkative is this coin right now compared to its usual self?"</p>
+      <ul class="overlay-privacy-list">
+        <li><strong>Quiet</strong> - less than half the usual level</li>
+        <li><strong>Active</strong> - around normal (0.5x - 2x average)</li>
+        <li><strong>Buzzing</strong> - noticeably above normal (2x - 6x average)</li>
+        <li><strong>Spiking</strong> - unusual attention (more than 6x average)</li>
+      </ul>
+
+      <p class="overlay-section-label">Chatter tone</p>
+      <p class="overlay-body">Crypto Twitter is structurally positive - most coins run 60-80% positive on a normal day. Absolute sentiment numbers are meaningless. What matters is whether sentiment has <strong>shifted</strong> relative to this coin's own baseline.</p>
+      <p class="overlay-body">For each cycle, we compute a <strong>raw net score</strong> (positive% minus negative%) and compare it to the coin's <strong>30-day rolling average</strong> of the same metric. The difference is the <strong>shift</strong>:</p>
+      <p class="overlay-body" style="text-align:center; font-size:13px;"><strong>shift = (current net) - (30-day average net)</strong></p>
+      <p class="overlay-body">If a coin normally runs at net +55 and today it's at net +35, the shift is <strong>-20</strong> - sentiment has dropped significantly below its usual level, even though the absolute numbers are still positive.</p>
+      <p class="overlay-body">The shift maps to a label:</p>
+      <ul class="overlay-privacy-list">
+        <li><strong>Above +16</strong> - Bullish (much more positive than usual)</li>
+        <li><strong>+8 to +16</strong> - Positive</li>
+        <li><strong>-8 to +8</strong> - Neutral (near baseline)</li>
+        <li><strong>-16 to -8</strong> - Negative</li>
+        <li><strong>Below -16</strong> - Bearish (much more negative than usual)</li>
+      </ul>
+      <p class="overlay-body">The color reflects the label: <strong class="tone-positive">green</strong> for Positive and above, <strong class="tone-negative">red</strong> for Negative and below, and <strong class="tone-mixed">grey</strong> for Neutral.</p>
+      <p class="overlay-body">This is the same logic used for Chatter Level (EC vs 30-day mean) - relative to the coin's own history, not absolute numbers.</p>
+      <p class="overlay-body">Tone is only shown when we have enough data to be confident (at least 5 posts and high model confidence). Coins with fewer than 30 historical readings show a simplified raw net label while their baseline builds up.</p>
+
+      <p class="overlay-section-label">Derivatives data</p>
+      <p class="overlay-body">Funding, OI flow, and Whale lean come from Binance perpetual futures contracts.</p>
+      <ul class="overlay-privacy-list">
+        <li><strong>Funding</strong> - shows whether leveraged longs or shorts are paying a premium to hold their positions.</li>
+        <li><strong>OI flow</strong> - whether new money is entering (OI rising) or leaving (OI falling) derivatives.</li>
+        <li><strong>Whale lean</strong> - which direction the largest traders are positioned, relative to the market.</li>
+      </ul>
+
+      <div class="overlay-disclaimer">
+        <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Coin picker panel: full-popup overlay ─────────────────────── -->
+  <div class="picker-panel hidden" id="picker-panel">
+    <div class="picker-header">
+      <button class="picker-btn picker-close-btn" id="picker-close">&#x2715;</button>
+      <span class="picker-title">Choose your coins</span>
+      <button class="picker-btn picker-done-btn" id="picker-done">Done</button>
+    </div>
+    <div class="picker-search-wrap">
+      <input class="picker-search-input" id="picker-search-input" type="text" placeholder="Search by symbol..." autocomplete="off" />
+    </div>
+    <!-- Bulk actions: shown only for Pro users -->
+    <div class="picker-bulk-actions hidden" id="picker-bulk-actions">
+      <button class="picker-bulk-btn" id="picker-select-all">Select all</button>
+      <button class="picker-bulk-btn" id="picker-deselect-all">Deselect all</button>
+    </div>
+    <!-- Sort chips: always visible -->
+    <div class="picker-sort-chips" id="picker-sort-chips">
+      <button class="sort-chip active" data-sort="alpha">A-Z</button>
+      <button class="sort-chip" data-sort="spiking">Spiking</button>
+      <button class="sort-chip" data-sort="buzzing">Buzzing</button>
+      <button class="sort-chip" data-sort="active">Active</button>
+      <button class="sort-chip" data-sort="quiet">Quiet</button>
+    </div>
+    <div class="coin-list" id="coin-list">
+      <!-- Rows injected by JS -->
+    </div>
+  </div>
+
+  <script src="extensionpay.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,71 @@
+# /etc/nginx/sites-available/instrumetriq-api
+#
+# Serves the extension payload JSON on api.instrumetriq.com.
+# Requires a shared bearer token in the Authorization header.
+# The token is a placeholder here - inject the real value on the VPS only,
+# never commit a real token to this file.
+#
+# Deploy steps:
+#   1. Copy to /etc/nginx/sites-available/instrumetriq-api
+#   2. Replace REPLACE_WITH_BEARER_TOKEN with the real token (in place, on VPS)
+#   3. ln -s /etc/nginx/sites-available/instrumetriq-api /etc/nginx/sites-enabled/
+#   4. certbot --nginx -d api.instrumetriq.com
+#   5. nginx -t && systemctl reload nginx
+
+# Rate limit zone - 1 req/s per IP, 10MB shared memory (~160k IPs).
+limit_req_zone $binary_remote_addr zone=instriq_api:10m rate=1r/s;
+
+# Map the Authorization header to an $auth_ok flag.
+# Any value other than the exact bearer token resolves to 0.
+# map_hash_bucket_size must accommodate the full "Bearer <token>" string length.
+map_hash_bucket_size 128;
+map $http_authorization $auth_ok {
+    default                               0;
+    "Bearer REPLACE_WITH_BEARER_TOKEN"    1;
+}
+
+server {
+    listen 80;
+    server_name api.instrumetriq.com;
+    # certbot will add the redirect to 443 here
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name api.instrumetriq.com;
+
+    # TLS - certbot fills these in during provisioning
+    ssl_certificate     /etc/letsencrypt/live/api.instrumetriq.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.instrumetriq.com/privkey.pem;
+    include             /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /var/www/instrumetriq-api;
+
+    # Payload endpoint - the only served path
+    location = /data/extension_payload.json {
+        limit_req zone=instriq_api burst=5 nodelay;
+
+        if ($auth_ok = 0) {
+            return 401;
+        }
+
+        # Let the extension use If-Modified-Since / ETag for 304 responses.
+        add_header Cache-Control "no-cache, must-revalidate";
+
+        # gzip on the fly for clients that accept it (~30-50KB vs ~200KB uncompressed)
+        gzip            on;
+        gzip_types      application/json;
+        gzip_min_length 1024;
+        gzip_vary       on;
+
+        # CORS is not needed - Chrome service workers use the extension's origin,
+        # not a browser document origin. Leave it out to avoid widening the surface.
+    }
+
+    # Reject everything else with a plain 404
+    location / {
+        return 404;
+    }
+}
