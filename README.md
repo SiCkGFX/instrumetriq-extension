@@ -1,10 +1,10 @@
-# Instrumetriq
+<img src="extension/icons/instrumetriq-logo.svg" alt="Instrumetriq" width="480">
 
 **X (Twitter) chatter indicators for crypto, right in your browser.**
 
 Instrumetriq is a Chrome and Firefox extension that shows you what the crowd is saying
-about any coin - chatter levels, tone shifts, derivatives positioning, and volume -
-updated every 2-4 hours. Open any supported exchange or coin page, click the icon, and
+about coins listed on Binance futures - chatter levels, tone shifts, derivatives
+positioning, and volume. Open any supported exchange or coin page, click the icon, and
 see the full picture without leaving your tab.
 
 This is a passive awareness tool. It does not generate trading signals, price

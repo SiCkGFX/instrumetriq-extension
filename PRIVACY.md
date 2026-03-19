@@ -38,7 +38,7 @@ The extension stores your preferences using `chrome.storage.local`, which is pri
 The extension makes exactly two types of outbound requests:
 
 ### 1. Market data feed
-A `GET` request is made to `https://api.instrumetriq.com/data/extension_payload.json` approximately every 2 hours. This is a shared static file containing aggregated market metrics. No user data, coin selections, or identifiers are included in this request.
+A `GET` request is made to `https://api.instrumetriq.com/data/extension_payload.json` every 5 minutes. An `If-Modified-Since` header is included, so the server responds with `304 Not Modified` (no body) when the feed has not changed. The payload file is rebuilt up to every ~10 minutes as new archive data arrives, but each individual coin's data is refreshed every 2-3 hours on average (per-coin scrape cadence). Most requests result in a 304. No user data, coin selections, or identifiers are included in any request.
 
 ### 2. Pro license verification (Pro users only)
 If you subscribe to Instrumetriq Pro, the extension contacts [ExtensionPay](https://extensionpay.com) to verify your license status. Payment processing and account management are handled entirely by ExtensionPay and Stripe. Instrumetriq never receives or stores your payment details or email address. See [ExtensionPay's privacy policy](https://extensionpay.com/privacy) for details on how they handle your data.
