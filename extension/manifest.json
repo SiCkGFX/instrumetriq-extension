@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instrumetriq - Crypto Sentiment & Market Pulse",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "X (Twitter) chatter levels and tone shifts for 257 crypto coins. Funding rates, open interest, and whale positioning - one popup.",
 
   "action": {
@@ -44,30 +44,89 @@
     },
     {
       "matches": [
-        "*://*.binance.com/en/trade/*",
-        "*://*.binance.com/en/futures/*",
+        "*://*.binance.com/*/trade/*",
+        "*://*.binance.com/*/futures/*",
+
         "*://*.tradingview.com/chart/*",
+        "*://*.tradingview.com/symbols/*",
+
         "*://*.bybit.com/trade/*",
+        "*://*.bybit.com/*/trade/*",
+
         "*://*.okx.com/trade-spot/*",
+        "*://*.okx.com/trade-swap/*",
+        "*://*.okx.com/trade-futures/*",
+        "*://*.okx.com/*/trade-spot/*",
+        "*://*.okx.com/*/trade-swap/*",
+        "*://*.okx.com/*/trade-futures/*",
+
         "*://*.coinbase.com/advanced-trade/*",
+        "*://*.coinbase.com/price/*",
+        "*://coinbase.com/price/*",
+
         "*://pro.kraken.com/app/trade/*",
+
         "*://*.bitget.com/spot/*",
+        "*://*.bitget.com/*/spot/*",
+
         "*://*.kucoin.com/trade/*",
+        "*://*.kucoin.com/*/trade/*",
+        "*://*.kucoin.com/price/*",
+        "*://*.kucoin.com/*/price/*",
+
         "*://*.gate.com/trade/*",
         "*://*.gate.io/trade/*",
+        "*://*.gate.com/*/trade/*",
+        "*://*.gate.io/*/trade/*",
+
         "*://*.mexc.com/exchange/*",
+        "*://*.mexc.com/*/exchange/*",
+
         "*://*.htx.com/trade/*",
+        "*://*.htx.com/*/trade/*",
+
         "*://*.crypto.com/exchange/trade/*",
+        "*://*.crypto.com/*/exchange/trade/*",
+        "*://crypto.com/exchange/trade/*",
+        "*://crypto.com/*/exchange/trade/*",
+        "*://*.crypto.com/price/*",
+        "*://*.crypto.com/*/price/*",
+        "*://crypto.com/price/*",
+        "*://crypto.com/*/price/*",
+
+        "*://*.phemex.com/trade/*",
+        "*://phemex.com/trade/*",
         "*://*.phemex.com/spot/trade/*",
+        "*://phemex.com/spot/trade/*",
+
         "*://*.bingx.com/*/spot/*",
+        "*://bingx.com/*/spot/*",
+
         "*://trading.bitfinex.com/t/*",
+
         "*://*.dydx.exchange/trade/*",
+        "*://*.dydx.trade/trade/*",
+        "*://dydx.trade/trade/*",
+
         "*://*.coingecko.com/*/coins/*",
+
         "*://*.coinmarketcap.com/currencies/*",
+        "*://*.coinmarketcap.com/*/currencies/*",
+        "*://coinmarketcap.com/currencies/*",
+        "*://coinmarketcap.com/*/currencies/*",
+
         "*://*.coindesk.com/price/*",
+
         "*://*.cryptocompare.com/coins/*",
+
         "*://*.messari.io/project/*",
+        "*://messari.io/project/*",
+
         "*://*.defillama.com/protocol/*",
+        "*://defillama.com/protocol/*",
+        "*://*.defillama.com/chain/*",
+        "*://defillama.com/chain/*",
+
         "*://*.kraken.com/prices/*"
       ],
       "js": ["content.js"],
