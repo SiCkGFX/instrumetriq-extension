@@ -116,6 +116,14 @@ the receipt.
 All data is visible to all users. Pro unlocks tracking more coins - nothing else is
 paywalled.
 
+> **Note for sideloaded installs:** If you install the extension by loading the `.zip`
+> directly (developer mode / unpacked), ExtensionPay will route you to a test payment
+> page and Pro cannot be activated. This is a limitation of ExtensionPay - it only
+> enables real payments for extensions installed through an official browser store.
+> To use Pro, install through the
+> [Chrome Web Store](https://chromewebstore.google.com) or
+> [Firefox Add-ons](https://addons.mozilla.org).
+
 ---
 
 ## Privacy
