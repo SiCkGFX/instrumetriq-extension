@@ -16,6 +16,11 @@ let lastDetectedSymbol  = null; // cached across re-renders
 let theme               = 'auto';
 let pickerSort          = 'alpha';
 
+// ── Narrative cache ───────────────────────────────────────────────────
+// Key: coin symbol. Cleared whenever pushed_at advances (new feed cycle).
+const narrativeCache = {};
+let narrativePushedAt = null;
+
 // ── DOM references ────────────────────────────────────────────────────
 let cardAreaEl, prevBtn, nextBtn, counterEl, coinNameEl, editBtn;
 let refreshBtn;
@@ -75,8 +80,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   let needsRender = false;
-  if (changes.lastPayload)  { currentPayload = changes.lastPayload.newValue;   needsRender = true; }
-  if (changes.trackedCoins) { trackedCoins   = changes.trackedCoins.newValue ?? []; needsRender = true; }  if (changes.isPro)        { isPro          = changes.isPro.newValue ?? false;      needsRender = true; }  if (needsRender) render(lastDetectedSymbol);
+  if (changes.lastPayload) {
+    const newPayload = changes.lastPayload.newValue;
+    // Invalidate narrative cache when the feed cycle advances
+    if (newPayload?.pushed_at && newPayload.pushed_at !== narrativePushedAt) {
+      Object.keys(narrativeCache).forEach(k => delete narrativeCache[k]);
+      narrativePushedAt = newPayload.pushed_at;
+    }
+    currentPayload = newPayload;
+    needsRender = true;
+  }
+  if (changes.trackedCoins) { trackedCoins   = changes.trackedCoins.newValue ?? []; needsRender = true; }  if (changes.isPro)        { isPro          = changes.isPro.newValue ?? false;      needsRender = true; }  if (needsRender) {
+    render(lastDetectedSymbol);
+    // Refresh picker list if it is currently open (e.g. payload arrived during first-run onboarding)
+    if (pickerPanel && !pickerPanel.classList.contains('hidden')) {
+      renderPickerList(pickerSearchInput ? pickerSearchInput.value.trim().toUpperCase() : '');
+    }
+  }
 });
 
 // ── Assign DOM references ─────────────────────────────────────────────
@@ -227,6 +247,8 @@ function wireInteractions() {
 
   onboardingContinueBtn.addEventListener('click', () => {
     onboardingPanel.classList.add('hidden');
+    // Trigger a fetch if the background hasn't cached a payload yet
+    if (!currentPayload) chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
     openPicker();
   });
 
@@ -279,12 +301,12 @@ function wireInteractions() {
     if (!coin?.sparkline?.length) return;
     var agg = aggregateSparkline(coin.sparkline, coin.sparkline_tone, coin.sparkline_ts, tf, coin.sparkline_pos, coin.sparkline_neg);
     var wrap = card.querySelector('.sparkline-chart-wrap');
-    if (wrap) wrap.innerHTML = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, tf, agg.keys, agg.pos, agg.neg);
+    if (wrap) setHTML(wrap, buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, tf, agg.keys, agg.pos, agg.neg));
   }, true);
 
   footerBrandLink.addEventListener('click', e => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://instrumetriq.com' });
+    chrome.tabs.create({ url: 'https://pulse.instrumetriq.com' });
   });
 
   searchBtn.addEventListener('click', () => {
@@ -321,7 +343,7 @@ function wireInteractions() {
     var text = e.target.getAttribute('data-tooltip');
     if (!text) return;
     clearTimeout(sparkTipTimer);
-    sparkTip.innerHTML = text.replace(/\n/g, '<br>');
+    setHTML(sparkTip, text.replace(/\n/g, '<br>'));
     sparkTip.style.opacity = '1';
     var rect = e.target.getBoundingClientRect();
     var tipW = sparkTip.offsetWidth;
@@ -348,9 +370,11 @@ async function queryContentScript() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return null;
+    // Inject on demand using activeTab (granted when user clicks the icon to open the popup)
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
     return await chrome.tabs.sendMessage(tab.id, { type: 'GET_COIN_SYMBOL' });
   } catch (_e) {
-    return null; // tab has no content script (not a trading page) - silent
+    return null; // not a supported page or scripting unavailable - silent
   }
 }
 
@@ -424,9 +448,9 @@ function render(detectedSymbol) {
     return;
   }
 
-  cardAreaEl.innerHTML = specs.map((s, i) =>
+  setHTML(cardAreaEl, specs.map((s, i) =>
     buildCardHtml(s, i === 0 ? 'active-card' : 'hidden-card')
-  ).join('');
+  ).join(''));
 
   // Start on detected coin if present
   let startIdx = 0;
@@ -516,8 +540,11 @@ function buildNormalCardHtml(coin, visClass) {
     buildScaleHtml(level) +
     buildSparklineHtml(coin) +
     '<div class="data-rows">' + buildRowsHtml(coin) + '</div>' +
-    buildXLink(sym, level) +
-    '<div class="updated-ago">' + buildUpdatedAgo(coin) + '</div>' +
+    '<div class="narrative-area" data-symbol="' + esc(sym) + '"></div>' +
+    '<div class="card-footer-row">' +
+      buildXLink(sym, level) +
+      '<span class="updated-ago">' + buildUpdatedAgo(coin) + '</span>' +
+    '</div>' +
     '<p class="card-disclaimer">Social chatter data only. Not a trading signal. Data may be delayed.</p>' +
   '</div>';
 }
@@ -727,8 +754,7 @@ function buildSparklineHtml(coin) {
   var agg = aggregateSparkline(sl, tone, ts, 'cycle', coin.sparkline_pos, coin.sparkline_neg);
   var barsHtml = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, 'cycle', null, agg.pos, agg.neg);
 
-  return headerHtml + '<div class="sparkline-chart-wrap">' + barsHtml + '</div>' +
-    '<p class="sparkline-footnote">Bars show engagement on a log scale. <a href="#" class="methodology-link">How it works</a></p>';
+  return headerHtml + '<div class="sparkline-chart-wrap">' + barsHtml + '</div>';
 }
 
 // ── Data rows ─────────────────────────────────────────────────────────
@@ -836,7 +862,65 @@ function buildUpdatedAgo(coin) {
   return rem ? 'updated ' + hr + 'h ' + rem + ' min ago' : 'updated ' + hr + 'h ago';
 }
 
-// ── Tooltip copy helpers ──────────────────────────────────────────────
+// ── AI narrative ──────────────────────────────────────────────────────
+
+async function fetchNarrative(sym, coinData) {
+  const pushedAt = currentPayload?.pushed_at ?? null;
+  const el = cardAreaEl.querySelector('.narrative-area[data-symbol="' + sym + '"]');
+  if (!el) return;
+
+  function setNarrativeText(container, text) {
+    container.textContent = '';
+    const span = document.createElement('span');
+    span.className = 'narrative-text';
+    span.textContent = text;
+    container.appendChild(span);
+  }
+
+  function setNarrativeLoading(container) {
+    container.textContent = '';
+    const span = document.createElement('span');
+    span.className = 'narrative-loading';
+    span.textContent = 'Analyzing...';
+    container.appendChild(span);
+  }
+
+  // In-memory cache hit
+  if (narrativeCache[sym]) {
+    setNarrativeText(el, narrativeCache[sym]);
+    return;
+  }
+
+  setNarrativeLoading(el);
+
+  // Build the minimal coinData payload - only include sections with ok: true
+  const payload = { symbol: sym, pushedAt };
+  const cd = {};
+  if (coinData.chatter?.ok) cd.chatter = coinData.chatter;
+  if (coinData.volume?.ok)  cd.volume  = coinData.volume;
+  if (coinData.futures?.ok) cd.futures = coinData.futures;
+  payload.coinData = cd;
+
+  try {
+    const res = await fetch('https://instrumetriq.com/api/coin-narrative', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { el.textContent = ''; return; }
+    const text = (await res.text()).trim();
+    if (!text) { el.textContent = ''; return; }
+    narrativeCache[sym] = text;
+    // Re-check element is still in DOM (user may have navigated away)
+    const live = cardAreaEl.querySelector('.narrative-area[data-symbol="' + sym + '"]');
+    if (live) setNarrativeText(live, text);
+  } catch (_) {
+    // Silent failure - narrative is enhancement only
+    el.textContent = '';
+  }
+}
+
+
 function levelBadgeTooltip(level) {
   return {
     Spiking: 'Spiking: chatter is more than 6x above this coin\'s 30-day average. Very unusual activity.',
@@ -856,11 +940,11 @@ function levelValueTooltip(level) {
 }
 
 function toneLabel(shift) {
-  if (shift > 16)  return 'Bullish';
-  if (shift > 8)   return 'Positive';
-  if (shift >= -8)  return 'Neutral';
-  if (shift >= -16) return 'Negative';
-  return 'Bearish';
+  if (shift > 16)  return 'Turning positive';
+  if (shift > 8)   return 'Leaning positive';
+  if (shift >= -8)  return 'Steady';
+  if (shift >= -16) return 'Leaning negative';
+  return 'Turning negative';
 }
 
 function toneClass(shift) {
@@ -936,8 +1020,15 @@ function showCard(i) {
     c.classList.toggle('active-card', j === currentCardIdx);
     c.classList.toggle('hidden-card', j !== currentCardIdx);
   });
-  if (coinNameEl) coinNameEl.textContent = cards[currentCardIdx]?.dataset.symbol ?? '';
+  const sym = cards[currentCardIdx]?.dataset.symbol ?? '';
+  if (coinNameEl) coinNameEl.textContent = sym;
   if (counterEl)  counterEl.textContent  = (currentCardIdx + 1) + ' / ' + cards.length;
+
+  // Trigger narrative fetch for the now-visible coin
+  if (sym && currentPayload?.coins) {
+    const coinData = currentPayload.coins.find(c => c.symbol === sym);
+    if (coinData) fetchNarrative(sym, coinData);
+  }
 }
 
 // ── Header controls ───────────────────────────────────────────────────
@@ -1127,9 +1218,9 @@ function renderPickerList(filter) {
     }
   });
 
-  coinListEl.innerHTML = html;
+  setHTML(coinListEl, html);
 
-  // Attach checkbox listeners after innerHTML injection
+  // Attach checkbox listeners after DOM injection
   coinListEl.querySelectorAll('.coin-checkbox').forEach(cb => {
     cb.addEventListener('change', () => handlePickerCheckbox(cb.dataset.symbol, cb.checked));
   });
@@ -1189,9 +1280,9 @@ function onSearchInput() {
   const matches = symbols.filter(s => s.startsWith(q));
   if (!matches.length) { closeSearchDropdown(); return; }
 
-  searchDropdown.innerHTML = matches
+  setHTML(searchDropdown, matches
     .map(s => '<div class="search-item" data-coin="' + esc(s) + '">' + esc(s) + '</div>')
-    .join('');
+    .join(''));
   searchDropdown.classList.remove('hidden');
 
   searchDropdown.querySelectorAll('.search-item').forEach((item, i) => {
@@ -1291,4 +1382,10 @@ function esc(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function setHTML(el, html) {
+  var doc = new DOMParser().parseFromString(html, 'text/html');
+  el.replaceChildren();
+  while (doc.body.firstChild) el.appendChild(document.adoptNode(doc.body.firstChild));
 }

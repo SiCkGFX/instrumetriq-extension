@@ -76,15 +76,75 @@ def patch_manifest_firefox(manifest_text):
     # Firefox uses background.scripts, not service_worker
     m['background'] = {'scripts': ['background.js']}
 
+    # AMO limits name to 45 characters
+    if len(m.get('name', '')) > 45:
+        m['name'] = 'Instrumetriq - Crypto Sentiment & Pulse'
+
     # Add Firefox-specific settings with stable extension ID
     m['browser_specific_settings'] = {
         'gecko': {
             'id': FIREFOX_EXTENSION_ID,
-            'strict_min_version': '109.0',
+            'strict_min_version': '142.0',
+            'data_collection_permissions': {
+                'required': ['none'],
+            },
         }
     }
 
     return json.dumps(m, indent=2) + '\n'
+
+
+def build_source_zip():
+    """
+    Build a source code zip for AMO reviewer submission.
+    Includes all files needed to reproduce the Firefox zip, minus secrets.
+    A placeholder secrets.js is included so reviewers can see the expected shape.
+    """
+    output = os.path.join(REPO, 'instrumetriq-source.zip')
+
+    # Files/dirs to include relative to REPO root
+    source_files = [
+        'README.md',
+        'scripts/build_zip.py',
+        'extension/manifest.json',
+        'extension/popup.html',
+        'extension/popup.css',
+        'extension/popup.js',
+        'extension/content.js',
+        'extension/background.js',
+        'extension/extensionpay.js',
+        'extension/icons/icon16.png',
+        'extension/icons/icon48.png',
+        'extension/icons/icon128.png',
+        'extension/icons/instrumetriq-logo.svg',
+    ]
+
+    placeholder_secrets = (
+        "// secrets.js — fill in your values before running build_zip.py\n"
+        "// BEARER_TOKEN is the API token for api.instrumetriq.com\n"
+        "const BEARER_TOKEN = 'REPLACE_WITH_BEARER_TOKEN';\n"
+    )
+
+    if os.path.exists(output):
+        os.remove(output)
+
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as z:
+        for rel in source_files:
+            full = os.path.join(REPO, rel)
+            if os.path.exists(full):
+                z.write(full, rel)
+            else:
+                print(f"  WARNING: skipped missing file: {rel}")
+        # Add placeholder secrets.js
+        z.writestr('extension/secrets.js', placeholder_secrets)
+
+    size_kb = os.path.getsize(output) / 1024
+    print(f"Built: {output} ({size_kb:.0f} KB)")
+    print("Included files:")
+    with zipfile.ZipFile(output, 'r') as z:
+        for info in z.infolist():
+            print(f"  {info.filename} ({info.compress_size} bytes compressed)")
+    print()
 
 
 def build_zip(target):
@@ -127,13 +187,18 @@ def build_zip(target):
 
 def main():
     parser = argparse.ArgumentParser(description='Build Instrumetriq extension zip')
-    parser.add_argument('--target', choices=['chrome', 'firefox', 'all'],
+    parser.add_argument('--target', choices=['chrome', 'firefox', 'source', 'all'],
                         default='chrome', help='Build target (default: chrome)')
     args = parser.parse_args()
 
-    targets = ['chrome', 'firefox'] if args.target == 'all' else [args.target]
-    for t in targets:
-        build_zip(t)
+    if args.target == 'all':
+        build_zip('chrome')
+        build_zip('firefox')
+        build_source_zip()
+    elif args.target == 'source':
+        build_source_zip()
+    else:
+        build_zip(args.target)
 
 
 if __name__ == '__main__':

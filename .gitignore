@@ -13,6 +13,8 @@ logs/
 *.zip
 
 # ── Internal-only files (not for public repo) ────────────────────────────────
+# Internal payload schema reference
+payload_schema.json
 # Internal product spec
 EXTENSION_PLAN.md
 # Internal development changelog

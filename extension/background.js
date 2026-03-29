@@ -126,8 +126,12 @@ async function fetchPayload() {
     // Determine whether this is a genuinely new push
     const isNew = payload.pushed_at > lastPushedAt;
 
-    // Write new payload (lastPushedAt is intentionally never overwritten)
-    await chrome.storage.local.set({ lastPayload: payload });
+    // Write new payload. Advance lastPushedAt when a new cycle is detected so
+    // subsequent polls for the same cycle don't re-fire notifications.
+    await chrome.storage.local.set({
+      lastPayload: payload,
+      ...(isNew ? { lastPushedAt: payload.pushed_at } : {})
+    });
 
     updateBadge(payload, coins, mode);
 

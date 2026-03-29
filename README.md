@@ -31,10 +31,18 @@ reach, and post count. A visual scale strip on each card shows where the coin fa
 NLP analysis classifies posts as positive, negative, or neutral and computes a shift
 relative to the coin's own historical baseline:
 
-- **Bullish / Positive / Neutral / Negative / Bearish** labels
+- **Turning positive / Leaning positive / Steady / Leaning negative / Turning negative**
 - Shift magnitude shown (e.g., "+28 shift")
 - Quality-gated: hidden when data is insufficient or stale, so you never see a
   misleading label
+
+### AI narrative
+
+A 1-2 sentence plain-language summary is generated per coin on demand when you open
+a card. Powered by OpenAI via the instrumetriq.com API. The summary uses only the
+data that passed quality gates - funding, OI, whale positioning, chatter level, and
+tone - so it never describes data that is stale or unavailable. Results are cached
+server-side so repeat opens are instant.
 
 ### Derivatives dashboard
 
