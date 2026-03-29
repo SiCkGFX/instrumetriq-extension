@@ -39,10 +39,10 @@ relative to the coin's own historical baseline:
 ### AI narrative
 
 A 1-2 sentence plain-language summary is generated per coin on demand when you open
-a card. Powered by OpenAI via the instrumetriq.com API. The summary uses only the
-data that passed quality gates - funding, OI, whale positioning, chatter level, and
-tone - so it never describes data that is stale or unavailable. Results are cached
-server-side so repeat opens are instant.
+a card. Powered by OpenAI via the instrumetriq.com API. Only data sections that are
+current and valid are included in the request - stale or unavailable sections are
+omitted - so the summary never describes data the card itself is hiding. Results are
+cached server-side so repeat opens are instant.
 
 ### Derivatives dashboard
 
