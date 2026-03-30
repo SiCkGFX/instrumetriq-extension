@@ -2,6 +2,11 @@
 
 All notable changes to Instrumetriq will be documented here.
 
+## [1.0.12] - 2026-03-30
+
+### Fixed
+- AI narrative was re-fetched on every popup open because the in-memory cache (`narrativeCache{}`) lives in the popup's JS context, which is destroyed when the popup closes. Fixed by persisting the cache to `chrome.storage.local` under two new keys: `narrativeTexts` (symbol → text map) and `narrativePushedAt` (the feed timestamp the texts were generated for). On popup open, the stored cache is restored if `narrativePushedAt` still matches the current `pushed_at` (same data cycle). On feed cycle advance, the stored cache is cleared via `chrome.storage.local.remove('narrativeTexts')`. Result: reopening the popup surfaces previously fetched narratives instantly with no network call, for the lifetime of the current data cycle.
+
 ## [1.0.11] - 2026-03-29
 
 ### Fixed

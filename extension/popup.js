@@ -43,7 +43,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Single batched storage read
   const stored = await chrome.storage.local.get([
     'trackedCoins', 'isPro', 'lastPayload', 'badgeMode',
-    'notificationsEnabled', 'pickerSetupDone', 'theme'
+    'notificationsEnabled', 'pickerSetupDone', 'theme',
+    'narrativeTexts', 'narrativePushedAt'
   ]);
 
   trackedCoins         = stored.trackedCoins         ?? [];
@@ -53,6 +54,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   notificationsEnabled = stored.notificationsEnabled ?? false;
   pickerSetupDone      = stored.pickerSetupDone      ?? false;
   theme                = stored.theme                ?? 'auto';
+
+  // Restore narrative cache from storage so reopening the popup is instant
+  narrativePushedAt = stored.narrativePushedAt ?? null;
+  if (stored.narrativeTexts && narrativePushedAt === currentPayload?.pushed_at) {
+    Object.assign(narrativeCache, stored.narrativeTexts);
+  }
 
   applyTheme(theme);
   syncHeaderControls();
@@ -86,6 +93,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (newPayload?.pushed_at && newPayload.pushed_at !== narrativePushedAt) {
       Object.keys(narrativeCache).forEach(k => delete narrativeCache[k]);
       narrativePushedAt = newPayload.pushed_at;
+      chrome.storage.local.remove('narrativeTexts');
     }
     currentPayload = newPayload;
     needsRender = true;
@@ -911,6 +919,11 @@ async function fetchNarrative(sym, coinData) {
     const text = (await res.text()).trim();
     if (!text) { el.textContent = ''; return; }
     narrativeCache[sym] = text;
+    // Persist to storage so the cache survives popup close/reopen
+    chrome.storage.local.set({
+      narrativeTexts: Object.assign({}, narrativeCache),
+      narrativePushedAt: pushedAt
+    });
     // Re-check element is still in DOM (user may have navigated away)
     const live = cardAreaEl.querySelector('.narrative-area[data-symbol="' + sym + '"]');
     if (live) setNarrativeText(live, text);

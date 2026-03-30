@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instrumetriq - Crypto Sentiment & Market Pulse",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "X (Twitter) chatter levels and tone shifts for 257 crypto coins. Funding rates, open interest, and whale positioning - one popup.",
 
   "action": {
