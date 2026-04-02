@@ -42,7 +42,8 @@ A 1-2 sentence plain-language summary is generated per coin on demand when you o
 a card. Powered by OpenAI via the instrumetriq.com API. Only data sections that are
 current and valid are included in the request - stale or unavailable sections are
 omitted - so the summary never describes data the card itself is hiding. Results are
-cached server-side so repeat opens are instant.
+cached server-side and locally for the duration of the current data cycle, so repeat
+opens are instant without additional network calls.
 
 ### Derivatives dashboard
 
