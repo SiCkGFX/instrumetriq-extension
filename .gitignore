@@ -13,8 +13,6 @@ logs/
 *.zip
 
 # ── Internal-only files (not for public repo) ────────────────────────────────
-# Internal payload schema reference
-payload_schema.json
 # Internal product spec
 EXTENSION_PLAN.md
 # Internal development changelog
@@ -28,6 +26,11 @@ scripts/update_csvs.py
 scripts/coin_universe.json
 # Internal pipeline and archive docs
 docs/
+# Internal migration planning
+DATASWEEP_MIGRATION_PLAN.md
+# Internal infrastructure & AI implementation
+AI_NARRATIVE_IMPLEMENTATION.md
+nginx/
 
 # ── Source assets not needed in repo ─────────────────────────────────────────
 extension/icons/instrumetriq-avatar.jpg
@@ -41,7 +44,14 @@ __pycache__/
 *.pyo
 .venv/
 
+# ── Temporary / debug ────────────────────────────────────────────────────────
+tmp/
+scripts/_test_*
+
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
 *.swp
 *.swo
+
+# ── Agent working instructions (not repo content) ─────────────────────────────
+CLAUDE.md

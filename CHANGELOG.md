@@ -2,6 +2,11 @@
 
 All notable changes to Instrumetriq will be documented here.
 
+## [Unreleased] - Server-side
+
+### Changed
+- AI narrative prompt rewritten (v2). The prompt now uses a system + user message split and instructs the model to produce exactly 2 sentences: one synthesising the social picture (chatter level, tone direction, author count), one interpreting what the derivatives signals suggest as a whole rather than listing funding, OI, and whale lean separately. Tone shift magnitude is pre-interpreted in the data layer before the model sees it: under 5 points = "essentially unchanged" (no directional language), 5-15 = mild, 15-30 = notable, 30+ = sharp. max_completion_tokens reduced from 120 to 100. No extension-side changes required - narratives are generated server-side by the Cloudflare Worker and cached in KV.
+
 ## [1.0.12] - 2026-03-30
 
 ### Fixed
