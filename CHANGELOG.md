@@ -4,8 +4,20 @@ All notable changes to Instrumetriq will be documented here.
 
 ## [Unreleased] - Server-side
 
+### Added
+- 15 more coins are now tracked (272 total), including 1000SATS, 1000CAT, OM, JUV, RAY, and OSMO.
+
+### Fixed
+- Coins with a quiet current cycle but real chatter history no longer disappear from the list — they stay visible with their sparkline, level, and "updated" time.
+- Funding and open-interest now show for ~38 coins where they were wrongly hidden (a staleness flag was misfiring on coins fetched later in the data-collection cycle).
+
 ### Changed
 - AI narrative prompt rewritten (v2). The prompt now uses a system + user message split and instructs the model to produce exactly 2 sentences: one synthesising the social picture (chatter level, tone direction, author count), one interpreting what the derivatives signals suggest as a whole rather than listing funding, OI, and whale lean separately. Tone shift magnitude is pre-interpreted in the data layer before the model sees it: under 5 points = "essentially unchanged" (no directional language), 5-15 = mild, 15-30 = notable, 30+ = sharp. max_completion_tokens reduced from 120 to 100. No extension-side changes required - narratives are generated server-side by the Cloudflare Worker and cached in KV.
+
+## [Unreleased] - Extension (targets v1.0.13, not yet submitted to stores)
+
+### Changed
+- Chatter sparkline now adapts to higher-frequency data. When updates arrive more often than ~90 minutes apart, the per-cycle ("C") view groups bars into ~2-hour windows so the chart stays readable instead of collapsing into slivers — while the newest bar is always shown on its own, so it reflects the very latest update and its color matches the Chatter tone. Hovering a bar now shows the exact time (or time range) it covers. No visible change on the current feed; this takes effect when the faster data feed goes live.
 
 ## [1.0.12] - 2026-03-30
 
