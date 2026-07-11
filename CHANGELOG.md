@@ -2,7 +2,7 @@
 
 All notable changes to Instrumetriq will be documented here.
 
-## [Unreleased] - Server-side
+## [Server-side] - 2026-07-12
 
 ### Added
 - 15 more coins are now tracked (272 total), including 1000SATS, 1000CAT, OM, JUV, RAY, and OSMO.
@@ -14,7 +14,7 @@ All notable changes to Instrumetriq will be documented here.
 ### Changed
 - AI narrative prompt rewritten (v2). The prompt now uses a system + user message split and instructs the model to produce exactly 2 sentences: one synthesising the social picture (chatter level, tone direction, author count), one interpreting what the derivatives signals suggest as a whole rather than listing funding, OI, and whale lean separately. Tone shift magnitude is pre-interpreted in the data layer before the model sees it: under 5 points = "essentially unchanged" (no directional language), 5-15 = mild, 15-30 = notable, 30+ = sharp. max_completion_tokens reduced from 120 to 100. No extension-side changes required - narratives are generated server-side by the Cloudflare Worker and cached in KV.
 
-## [Unreleased] - Extension (targets v1.0.14, not yet submitted to stores)
+## [1.0.14] - 2026-07-12
 
 ### Removed
 - The `scripting` permission. Coin detection no longer injects a script into trading pages: the popup reads the active tab's URL directly (granted by `activeTab` when you click the icon) and parses it locally. Same feature, smaller permission footprint. (The only script that still runs on any page is the manifest-declared ExtensionPay helper on extensionpay.com, used for payments.)
