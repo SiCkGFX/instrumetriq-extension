@@ -14,7 +14,7 @@ import logging
 import math
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -33,6 +33,10 @@ OUTPUT_PATH = Path("/var/www/instrumetriq-api/data/extension_payload.json")
 
 MIN_BASELINE       = 30
 FEED_INTERRUPTED_H = 6
+SPARKLINE_FULL_DAYS = 8   # keep full (~38-min) sparkline resolution for this many
+                          # days (covers the 7-day cycle view + live head); older
+                          # points are thinned to ~1/day to keep the payload under
+                          # the extension's chrome.storage.local quota (10 MB).
 
 logging.basicConfig(
     level=logging.INFO,
@@ -149,7 +153,7 @@ def chatter_level(ec: float, mean: float) -> str:
 def tone_quality_gate(row: dict) -> bool:
     """Does this row have reliable enough NLP output for a tone label?"""
     posts = row.get("posts_total")
-    if posts is None or posts < 5:
+    if posts is None or posts < 4:
         return False
     if not row.get("twitter_data_ok"):
         return False
@@ -303,6 +307,27 @@ def write_marker(path: Path, content: str) -> None:
 # Payload assembly
 # ---------------------------------------------------------------------------
 
+def sparkline_keep_indices(ts_list: list[str], full_days: int = SPARKLINE_FULL_DAYS) -> list[int]:
+    """Indices to keep for a size-bounded sparkline.
+
+    Every point within the last `full_days` (full ~38-min resolution — feeds the
+    cycle view's 2h merge + live head), plus the last point of each older calendar
+    day (enough for the day/week views, which bucket by day/week anyway). Bounds
+    the payload so it fits chrome.storage.local. `ts_list` is chronological.
+    """
+    if not ts_list:
+        return []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=full_days)).strftime("%Y-%m-%dT%H:%MZ")
+    recent: list[int] = []
+    older_last_by_day: dict[str, int] = {}
+    for i, ts in enumerate(ts_list):
+        if ts >= cutoff:
+            recent.append(i)
+        else:
+            older_last_by_day[ts[:10]] = i   # last index seen for that day
+    return sorted(older_last_by_day.values()) + recent
+
+
 def compute_cycle_minutes(all_coin_rows: dict[str, list[dict]], sample: int = 12) -> int | None:
     """Median minutes between consecutive recent rows across coins.
 
@@ -429,22 +454,45 @@ def build_payload(output_path: Path) -> None:
             # backfilled from a stale cycle).
             last_shift = shifts[-1] if shifts else None
 
+            tone_shift = None
+            tone_raw = None
+            tone_baseline = None
+            tone_pos = None
+            tone_neg = None
+            tone_reason = None   # why tone is hidden (frontend maps to a label)
+
+            last_row_for_tone = rows[-1]
             if last_shift is not None and baseline is not None:
-                last_row_for_tone = rows[-1]
                 pr = last_row_for_tone.get("pos_ratio") or 0
                 nr = last_row_for_tone.get("neg_ratio") or 0
-                raw_net_val = pr - nr
                 tone_shift = last_shift
-                tone_raw = max(-100, min(100, round(raw_net_val * 100)))
+                tone_raw = max(-100, min(100, round((pr - nr) * 100)))
                 tone_baseline = round(baseline * 100)
                 tone_pos = round(pr * 100)
                 tone_neg = round(nr * 100)
+            elif tone_quality_gate(last_row_for_tone) and baseline is None:
+                # Young coin: latest cycle is reliable but the 30-reading
+                # baseline is not built yet. Emit the raw net so the frontend
+                # can show its simplified fallback label (as documented in
+                # "How it works") instead of a generic insufficient-data.
+                pr = last_row_for_tone.get("pos_ratio") or 0
+                nr = last_row_for_tone.get("neg_ratio") or 0
+                tone_raw = max(-100, min(100, round((pr - nr) * 100)))
+                tone_pos = round(pr * 100)
+                tone_neg = round(nr * 100)
+                tone_reason = "no_baseline"
             else:
-                tone_shift = None
-                tone_raw = None
-                tone_baseline = None
-                tone_pos = None
-                tone_neg = None
+                # Latest cycle failed the quality gate. Distinguish why, so a
+                # coin with a viral 2-post EC spike says "too few posts"
+                # instead of the counterintuitive "insufficient data".
+                posts = last_row_for_tone.get("posts_total")
+                conf = last_row_for_tone.get("primary_conf_mean")
+                if posts is None or posts < 4:
+                    tone_reason = "few_posts"
+                elif not last_row_for_tone.get("twitter_data_ok"):
+                    tone_reason = "stale_sentiment"
+                elif conf is None or conf < 0.55:
+                    tone_reason = "low_confidence"
 
             # updated_ago_min: minutes since the last row's ts
             last_ts = last["ts"]  # e.g. "2026-03-18T07:00Z"
@@ -465,8 +513,16 @@ def build_payload(output_path: Path) -> None:
                 "tone_baseline":    tone_baseline,
                 "tone_pos":         tone_pos,
                 "tone_neg":         tone_neg,
+                "tone_reason":      tone_reason,
                 "updated_ago_min":  updated_ago,
                 "distinct_authors": distinct,
+                # Raw volume inputs for the "Chatter volume" row + its tooltips
+                "posts":            last.get("posts_total"),
+                "likes":            last.get("total_likes"),
+                "retweets":         last.get("total_retweets"),
+                "followers_sum":    last.get("followers_sum"),
+                "ec":               round(cur_ec, 1) if cur_ec is not None else None,
+                "ec_ratio":         (round(cur_ec / ec_mean, 2) if cur_ec / ec_mean < 1 else round(cur_ec / ec_mean, 1)) if (cur_ec is not None and ec_mean > 0) else None,
                 "ok":               True,
             }
 
@@ -516,23 +572,24 @@ def build_payload(output_path: Path) -> None:
         else:
             entry["volume"] = {"ok": False}
 
-        # ---- Sparklines ----
-        entry["sparkline"] = [round(v, 4) if v is not None else None
-                              for v in ec_vals]
-        entry["sparkline_tone"] = shifts
+        # ---- Sparklines (downsampled to bound payload size — see helper) ----
+        keep = sparkline_keep_indices([r["ts"] for r in rows])
+        entry["sparkline"] = [round(ec_vals[i], 4) if ec_vals[i] is not None else None
+                              for i in keep]
+        entry["sparkline_tone"] = [shifts[i] for i in keep]
         entry["sparkline_pos"] = [
-            round(r["pos_ratio"], 4) if (r.get("pos_ratio") is not None
-                                         and tone_quality_gate(r))
+            round(rows[i]["pos_ratio"], 4) if (rows[i].get("pos_ratio") is not None
+                                               and tone_quality_gate(rows[i]))
             else None
-            for r in rows
+            for i in keep
         ]
         entry["sparkline_neg"] = [
-            round(r["neg_ratio"], 4) if (r.get("neg_ratio") is not None
-                                         and tone_quality_gate(r))
+            round(rows[i]["neg_ratio"], 4) if (rows[i].get("neg_ratio") is not None
+                                               and tone_quality_gate(rows[i]))
             else None
-            for r in rows
+            for i in keep
         ]
-        entry["sparkline_ts"] = [r["ts"] for r in rows]
+        entry["sparkline_ts"] = [rows[i]["ts"] for i in keep]
 
         # ---- Quality ----
         entry["quality"] = (
