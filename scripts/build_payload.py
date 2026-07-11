@@ -33,7 +33,6 @@ OUTPUT_PATH = Path("/var/www/instrumetriq-api/data/extension_payload.json")
 
 MIN_BASELINE       = 30
 FEED_INTERRUPTED_H = 6
-FUTURES_STALE_SEC  = 3600
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,12 +90,10 @@ def read_coin_csv(path: Path) -> list[dict]:
                 "twitter_data_ok":          _bool(row["twitter_data_ok"]),
                 "futures_contract_exists":  _bool(row["futures_contract_exists"]),
                 "futures_data_ok":          _bool(row["futures_data_ok"]),
-                "futures_stale":            _bool(row["futures_stale"]),
                 "funding_now":              _float(row["funding_now"]),
                 "open_interest":            _float(row["open_interest"]),
                 "oi_delta_pct":             _float(row["oi_delta_pct"]),
                 "whale_ratio":              _float(row["whale_ratio"]),
-                "futures_age_sec":          _int(row["futures_age_sec"]),
                 "volume_usd":              _float(row["volume_usd"]),
             })
     rows.sort(key=lambda r: r["ts"])
@@ -210,15 +207,14 @@ def compute_tone_arrays(rows: list[dict]) -> tuple[list, float | None]:
 # ---------------------------------------------------------------------------
 
 def futures_gate(row: dict) -> tuple[bool, str]:
+    # Gate on data presence only. datasweep dropped the `futures_stale` flag and
+    # `futures_age_sec` (2026-07-11): both encoded queue position in the ~37-min
+    # collection cycle, not data age — live REST futures data is always current.
+    # "Fetch succeeded" is already captured by futures_data_ok.
     if not row.get("futures_contract_exists"):
         return False, "no_contract"
     if not row.get("futures_data_ok"):
         return False, "data_error"
-    if row.get("futures_stale"):
-        return False, "stale"
-    age = row.get("futures_age_sec")
-    if age is not None and age > FUTURES_STALE_SEC:
-        return False, "stale"
     return True, "ok"
 
 
@@ -307,6 +303,34 @@ def write_marker(path: Path, content: str) -> None:
 # Payload assembly
 # ---------------------------------------------------------------------------
 
+def compute_cycle_minutes(all_coin_rows: dict[str, list[dict]], sample: int = 12) -> int | None:
+    """Median minutes between consecutive recent rows across coins.
+
+    Signals the current feed cadence so the frontend can decide whether to
+    bucket high-frequency bars (Phase 2 gate: bucket when < 90). Uses each
+    coin's last `sample` rows so a cadence change (e.g. the datasweep source
+    switch, ~140 → ~38) is reflected quickly instead of diluted by 30 days of
+    history. Returns None if no intervals are computable.
+    """
+    diffs: list[float] = []
+    for rows in all_coin_rows.values():
+        recent = rows[-sample:]
+        for a, b in zip(recent, recent[1:]):
+            try:
+                ta = datetime.strptime(a["ts"], "%Y-%m-%dT%H:%MZ")
+                tb = datetime.strptime(b["ts"], "%Y-%m-%dT%H:%MZ")
+            except (ValueError, KeyError):
+                continue
+            mins = (tb - ta).total_seconds() / 60.0
+            if mins > 0:
+                diffs.append(mins)
+    if not diffs:
+        return None
+    diffs.sort()
+    n = len(diffs)
+    return round(diffs[n // 2] if n % 2 else (diffs[n // 2 - 1] + diffs[n // 2]) / 2)
+
+
 def build_payload(output_path: Path) -> None:
     _now = datetime.now(timezone.utc)
 
@@ -352,6 +376,9 @@ def build_payload(output_path: Path) -> None:
         if latest_ts_global is None or ts > latest_ts_global:
             latest_ts_global = ts
 
+    # ---------- Feed cadence (drives frontend bucketing decision) ----------
+    cycle_minutes_approx = compute_cycle_minutes(all_coin_rows)
+
     # ---------- Build per-coin entries ----------
     coins: list[dict] = []
     active_count = 0
@@ -386,8 +413,13 @@ def build_payload(output_path: Path) -> None:
         cur_ec = ec_vals[-1] if ec_vals else None
 
         # ---- Chatter block ----
-        if cur_ec is not None and ec_mean > 0:
-            level = chatter_level(cur_ec, ec_mean)
+        # Option B: render whenever the coin has chatter HISTORY (ec_mean > 0),
+        # not only when the latest cycle has activity. A silent latest cycle
+        # (cur_ec is None, e.g. datasweep is_silent=True) is treated as EC 0
+        # (level Quiet) so the coin keeps its sparkline / tone / updated_ago
+        # instead of dropping to insufficient_data and vanishing from the feed.
+        if ec_mean > 0:
+            level = chatter_level(cur_ec if cur_ec is not None else 0.0, ec_mean)
 
             # Single-source tone shift
             shifts, baseline = compute_tone_arrays(rows)
@@ -523,8 +555,9 @@ def build_payload(output_path: Path) -> None:
             pass
 
     payload = {
-        "pushed_at":         _now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "feed_ok":           feed_ok,
+        "pushed_at":            _now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cycle_minutes_approx": cycle_minutes_approx,
+        "feed_ok":              feed_ok,
         "active_coin_count": active_count,
         "coins":             coins,
     }
