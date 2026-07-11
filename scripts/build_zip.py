@@ -32,6 +32,7 @@ INCLUDE = [
     'manifest.json',
     'popup.html',
     'popup.css',
+    'sparkline-core.js',
     'popup.js',
     'content.js',
     'extensionpay.js',

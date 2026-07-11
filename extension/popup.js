@@ -307,7 +307,7 @@ function wireInteractions() {
     var sym = card.dataset.symbol;
     var coin = (currentPayload?.coins ?? []).find(function (c) { return c.symbol === sym; });
     if (!coin?.sparkline?.length) return;
-    var agg = aggregateSparkline(coin.sparkline, coin.sparkline_tone, coin.sparkline_ts, tf, coin.sparkline_pos, coin.sparkline_neg);
+    var agg = SparklineCore.aggregateSparkline(coin.sparkline, coin.sparkline_tone, coin.sparkline_ts, tf, { posArr: coin.sparkline_pos, negArr: coin.sparkline_neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
     var wrap = card.querySelector('.sparkline-chart-wrap');
     if (wrap) setHTML(wrap, buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, tf, agg.keys, agg.pos, agg.neg));
   }, true);
@@ -577,108 +577,7 @@ function buildScaleHtml(level) {
 
 // ── Sparkline ─────────────────────────────────────────────────────────
 
-// Aggregate sparkline data into per-day or per-week buckets.
-// Each bucket: mean EC, dominant tone, representative timestamp.
 var CYCLE_DAYS = 7; // rolling 7-day window for per-cycle bars
-
-function aggregateSparkline(sl, tone, ts, mode, posArr, negArr) {
-  if (mode === 'cycle') {
-    // Use timestamps to enforce a strict rolling 7-day window
-    var start = 0;
-    if (ts && ts.length) {
-      var cutoff = new Date(Date.now() - CYCLE_DAYS * 86400000).toISOString();
-      for (var i = 0; i < ts.length; i++) {
-        if (ts[i] >= cutoff) { start = i; break; }
-      }
-    } else {
-      // Fallback: no timestamps, take last ~60 entries (rough 7d estimate)
-      start = Math.max(0, sl.length - 60);
-    }
-    return {
-      vals:   sl.slice(start),
-      tones:  tone  ? tone.slice(start)  : null,
-      stamps: ts    ? ts.slice(start)    : null,
-      pos:    posArr ? posArr.slice(start) : null,
-      neg:    negArr ? negArr.slice(start) : null
-    };
-  }
-
-  var buckets = {};  // key -> { sum, count, tones: {}, ts }
-
-  // For week mode: build 7-day windows counting backwards from today
-  var weekEdges = null; // array of { start, end, key } newest-first
-  if (mode === 'week') {
-    weekEdges = [];
-    var today = new Date(); today.setUTCHours(23,59,59,999);
-    var cursor = new Date(today);
-    while (weekEdges.length < 4) { // 4 weeks = 28 days, within 30-day window
-      var wEnd = new Date(cursor);
-      var wStart = new Date(cursor); wStart.setUTCDate(wStart.getUTCDate() - 6);
-      wStart.setUTCHours(0,0,0,0);
-      var sk = wStart.toISOString().slice(0,10);
-      var ek = wEnd.toISOString().slice(0,10);
-      weekEdges.push({ start: wStart.getTime(), end: wEnd.getTime(), key: sk + '|' + ek });
-      cursor = new Date(wStart); cursor.setUTCDate(cursor.getUTCDate() - 1);
-      cursor.setUTCHours(23,59,59,999);
-    }
-    weekEdges.reverse(); // oldest first
-  }
-
-  // 30-day cutoff for day mode
-  var cutoff30d = new Date();
-  cutoff30d.setUTCDate(cutoff30d.getUTCDate() - 30);
-  cutoff30d.setUTCHours(0, 0, 0, 0);
-  var cutoff30dMs = cutoff30d.getTime();
-
-  for (var i = 0; i < sl.length; i++) {
-    var key;
-    var d = new Date(ts[i]);
-    if (mode === 'day') {
-      if (d.getTime() < cutoff30dMs) continue; // skip entries older than 30 days
-      key = ts[i].slice(0, 10); // YYYY-MM-DD
-    } else {
-      // Find which 7-day window this timestamp falls into
-      var dMs = d.getTime();
-      key = null;
-      for (var w = 0; w < weekEdges.length; w++) {
-        if (dMs >= weekEdges[w].start && dMs <= weekEdges[w].end) { key = weekEdges[w].key; break; }
-      }
-      if (!key) continue; // outside all windows, skip
-    }
-    if (!buckets[key]) buckets[key] = { sum: 0, count: 0, toneSum: 0, toneCount: 0, ts: ts[i], posSum: 0, negSum: 0, ratioCount: 0 };
-    buckets[key].sum += sl[i];
-    buckets[key].count++;
-    if (tone && tone[i] != null) {
-      buckets[key].toneSum += tone[i];
-      buckets[key].toneCount++;
-    }
-    buckets[key].ts = ts[i]; // keep latest ts in bucket
-    if (posArr && posArr[i] != null && negArr && negArr[i] != null) {
-      buckets[key].posSum += posArr[i];
-      buckets[key].negSum += negArr[i];
-      buckets[key].ratioCount++;
-    }
-  }
-
-  var keys = Object.keys(buckets).sort();
-  var vals = [], tones = [], stamps = [], bucketKeys = [], pos = [], neg = [];
-  keys.forEach(function (k) {
-    var b = buckets[k];
-    vals.push(b.sum / b.count);
-    // Average net tone score for the bucket
-    tones.push(b.toneCount > 0 ? Math.round(b.toneSum / b.toneCount) : null);
-    stamps.push(b.ts);
-    bucketKeys.push(k);
-    if (b.ratioCount > 0) {
-      pos.push(b.posSum / b.ratioCount);
-      neg.push(b.negSum / b.ratioCount);
-    } else {
-      pos.push(null);
-      neg.push(null);
-    }
-  });
-  return { vals: vals, tones: tones, stamps: stamps, keys: bucketKeys, pos: pos, neg: neg };
-}
 
 function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, negArr) {
   var logVals = vals.map(function (v) { return Math.log1p(v); });
@@ -691,12 +590,12 @@ function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, n
   var bars = '';
   vals.forEach(function (v, i) {
     var h = logMax > 0 ? Math.round((logVals[i] / logMax) * 100) : 0;
-    var t = (tones && tones[i] != null) ? (tones[i] > 8 ? 'positive' : tones[i] >= -8 ? 'mixed' : 'negative') : 'mixed';
+    var t = SparklineCore.toneClass(tones && tones[i]);
     var ecFmt = v >= 1000 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(1) : v >= 0.01 ? v.toFixed(2) : '0';
     var ecLbl = (v <= 0 || ecFmt === '0') ? 'EC 0 (silent)' : 'EC ' + ecFmt;
     if (mode === 'day')  ecLbl += ' (daily avg)';
     if (mode === 'week') ecLbl += ' (weekly avg)';
-    var dateLbl = formatBarDate(stamps && stamps[i], mode, bucketKeys && bucketKeys[i]);
+    var dateLbl = SparklineCore.formatBarDate(stamps && stamps[i], mode, bucketKeys && bucketKeys[i]);
     var toneLbl = '';
     if (tones && tones[i] != null) {
       toneLbl = 'Shift ' + (tones[i] > 0 ? '+' : '') + tones[i];
@@ -708,8 +607,8 @@ function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, n
     bars += '<div class="spark-bar ' + t + '" style="height:' + h + '%" data-tooltip="' + tip + '"></div>';
   });
 
-  var firstLabel = formatAxisDate(stamps && stamps[0], mode, bucketKeys && bucketKeys[0], 'first');
-  var lastLabel  = formatAxisDate(stamps && stamps[stamps.length - 1], mode, bucketKeys && bucketKeys[bucketKeys ? bucketKeys.length - 1 : 0], 'last') || 'Now';
+  var firstLabel = SparklineCore.formatAxisDate(stamps && stamps[0], mode, bucketKeys && bucketKeys[0], 'first');
+  var lastLabel  = SparklineCore.formatAxisDate(stamps && stamps[stamps.length - 1], mode, bucketKeys && bucketKeys[bucketKeys ? bucketKeys.length - 1 : 0], 'last') || 'Now';
 
   return '<div class="sparkline-chart">' +
     '<div class="y-axis">' +
@@ -737,7 +636,7 @@ function buildSparklineHtml(coin) {
 
   var headerHtml =
     '<div class="sparkline-header">' +
-      '<span class="sparkline-label" data-tooltip="How much people are talking about this coin.&#10;Each bar is one data cycle (~3h &#177;1h).&#10;Taller bars = more engagement.&#10;Colors show tone.">Chatter activity</span>' +
+      '<span class="sparkline-label" data-tooltip="How much people are talking about this coin.&#10;Each bar covers one update window (~2h); the newest bar is the latest update.&#10;Taller bars = more engagement.&#10;Colors show tone.">Chatter activity</span>' +
       '<div class="sparkline-controls">' +
         '<div class="sparkline-tf" data-tooltip="Switch timeframe: per-cycle, daily, or weekly bars.">' +
           '<button class="tf-btn active" data-tf="cycle">C</button>' +
@@ -759,8 +658,8 @@ function buildSparklineHtml(coin) {
       '</div>';
   }
 
-  var agg = aggregateSparkline(sl, tone, ts, 'cycle', coin.sparkline_pos, coin.sparkline_neg);
-  var barsHtml = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, 'cycle', null, agg.pos, agg.neg);
+  var agg = SparklineCore.aggregateSparkline(sl, tone, ts, 'cycle', { posArr: coin.sparkline_pos, negArr: coin.sparkline_neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
+  var barsHtml = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, 'cycle', agg.keys, agg.pos, agg.neg);
 
   return headerHtml + '<div class="sparkline-chart-wrap">' + barsHtml + '</div>';
 }
@@ -1337,57 +1236,11 @@ function selectSearchCoin(symbol) {
 }
 
 // ── Time formatting ───────────────────────────────────────────────────
-var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function fmtDate(d) {
-  return MONTH_SHORT[d.getMonth()] + ' ' + d.getDate();
-}
-
-function fmtDateTime(d) {
-  var h = d.getHours();
-  var m = d.getMinutes();
-  return MONTH_SHORT[d.getMonth()] + ' ' + d.getDate() + ', ' +
-    String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-}
-
 // Parse a date string like "2026-03-19" as a local-time date (noon to avoid
 // any DST edge at midnight).  Used for day/week bucket keys which represent
 // calendar days and must not shift when displayed in local time.
-function localDate(ymd) {
-  return new Date(ymd + 'T12:00:00');
-}
-
 // Tooltip date label for a single bar
-function formatBarDate(isoTs, mode, bucketKey) {
-  try {
-    if (mode === 'week' && bucketKey) {
-      var parts = bucketKey.split('|');
-      return fmtDate(localDate(parts[0])) + ' - ' + fmtDate(localDate(parts[1]));
-    }
-    if (mode === 'day' && bucketKey) {
-      return fmtDate(localDate(bucketKey));
-    }
-    // cycle mode: show date + time in local timezone
-    if (!isoTs) return '';
-    return fmtDateTime(new Date(isoTs));
-  } catch (_e) { return ''; }
-}
-
 // X-axis labels. posHint: 'first' or 'last' to pick start/end of week range.
-function formatAxisDate(isoTs, mode, bucketKey, posHint) {
-  try {
-    if (mode === 'week' && bucketKey) {
-      var idx = posHint === 'last' ? 1 : 0;
-      return fmtDate(localDate(bucketKey.split('|')[idx]));
-    }
-    if (mode === 'day' && bucketKey) {
-      return fmtDate(localDate(bucketKey));
-    }
-    if (!isoTs) return '';
-    return fmtDate(new Date(isoTs));
-  } catch (_e) { return ''; }
-}
-
 // ── HTML escape ───────────────────────────────────────────────────────
 function esc(s) {
   return String(s ?? '')
