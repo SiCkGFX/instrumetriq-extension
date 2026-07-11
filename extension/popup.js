@@ -373,16 +373,17 @@ function wireInteractions() {
   }, true);
 }
 
-// ── Query active tab's content script for coin symbol ─────────────────
+// ── Detect the coin on the active tab from its URL ────────────────────
+// activeTab (granted when the user clicks the icon) exposes tab.url; the
+// parsing happens locally via extractSymbol (content.js, loaded by popup.html).
+// Nothing is injected into the page.
 async function queryContentScript() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return null;
-    // Inject on demand using activeTab (granted when user clicks the icon to open the popup)
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tab.id, { type: 'GET_COIN_SYMBOL' });
+    if (!tab?.url) return null;
+    return extractSymbol(tab.url);
   } catch (_e) {
-    return null; // not a supported page or scripting unavailable - silent
+    return null; // not a supported page - silent
   }
 }
 
@@ -518,7 +519,7 @@ function buildTeaserCardHtml(symbol, coin, visClass) {
     ctaText = isHot
       ? esc(symbol) + ' is getting unusual chatter. '
       : '';
-    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 257 coins.</a>' +
+    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 250+ coins.</a>' +
       '<br><span class="teaser-hint">Or press <strong>Edit</strong> to replace one of your tracked coins.</span>';
   }
   return '<div class="card teaser-card ' + visClass + '" data-symbol="' + esc(symbol) + '">' +
@@ -551,7 +552,7 @@ function buildNormalCardHtml(coin, visClass) {
     '<div class="narrative-area" data-symbol="' + esc(sym) + '"></div>' +
     '<div class="card-footer-row">' +
       buildXLink(sym, level) +
-      '<span class="updated-ago">' + buildUpdatedAgo(coin) + '</span>' +
+      '<span class="updated-ago" data-tooltip="Data arrives in full sweeps of all coins, paced over ~40 min for exchange API limits. The clock counts from the sweep\'s start, so 55-95 min is normal - and all coins update together.">' + buildUpdatedAgo(coin) + '</span>' +
     '</div>' +
     '<p class="card-disclaimer">Social chatter data only. Not a trading signal. Data may be delayed.</p>' +
   '</div>';
@@ -696,14 +697,53 @@ function buildRowsHtml(coin) {
       '</span>' +
     '</div>';
   } else if (coin.chatter?.ok) {
+    // Tone hidden this cycle - say WHY. A viral 2-post spike can push the
+    // chatter level high while tone still needs >= 5 posts to read reliably.
+    var toneNA = {
+      few_posts: ['Too few posts',
+        'Fewer than 4 posts about this coin in the last update. Chatter level can still be high - engagement weighs likes and reach, so a couple of viral posts can spike it - but tone needs at least 4 posts to classify reliably.'],
+      low_confidence: ['Unclear tone',
+        'There were enough posts, but the language was too mixed or ambiguous to call a direction confidently.'],
+      stale_sentiment: ['Awaiting fresh data',
+        'The latest sentiment reading is older than usual. Tone will return with the next fresh update.']
+    }[coin.chatter?.tone_reason] || ['Insufficient data',
+        'Not enough data to determine sentiment reliably in the last update.'];
     html += '<div class="data-row">' +
       '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
-      '<span class="row-value" data-tooltip="Not enough posts to determine sentiment reliably in the last update.">Insufficient data</span>' +
+      '<span class="row-value" data-tooltip="' + esc(toneNA[1]) + '">' + esc(toneNA[0]) + '</span>' +
     '</div>';
   } else {
     html += '<div class="data-row">' +
       '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
       '<span class="quality-label" data-tooltip="No chatter detected in the past 30 days.">Silent</span>' +
+    '</div>';
+  }
+
+  // Chatter volume row - raw posts/authors; engagement + reach live in tooltips
+  const cv = coin.chatter;
+  if (cv?.ok && cv.posts != null) {
+    var cvLikes = cv.likes || 0, cvRts = cv.retweets || 0;
+    var postsTip = (cvLikes + cvRts) > 0
+      ? 'These posts collected ' + fmtCount(cvLikes) + ' likes and ' + fmtCount(cvRts) + ' retweets in the last update window.'
+      : 'No likes or retweets yet in the last update window.';
+    var cvAuth = cv.distinct_authors || 0;
+    var authTip = (cv.followers_sum != null && cvAuth > 0)
+      ? 'Combined reach of ' + fmtCount(cv.followers_sum) + ' followers - about ' + fmtCount(Math.round(cv.followers_sum / cvAuth)) + ' per author on average.'
+      : 'Unique accounts that posted about this coin in the last update window.';
+    var cvLabelTip = 'How much this coin is being talked about right now.';
+    if (cv.ec != null) {
+      cvLabelTip += ' Engagement coefficient ' + fmtCount(cv.ec) + (
+        cv.ec_ratio == null ? '.' :
+        cv.ec_ratio < 0.1 ? ' - well below this coin\'s own 30-day average.' :
+        ' - about ' + cv.ec_ratio + 'x this coin\'s own 30-day average.');
+    }
+    html += '<div class="data-row">' +
+      '<span class="row-label" data-tooltip="' + esc(cvLabelTip) + '">Chatter volume</span>' +
+      '<span class="row-value">' +
+        '<span data-tooltip="' + esc(postsTip) + '">' + cv.posts + (cv.posts === 1 ? ' post' : ' posts') + '</span>' +
+        ' · ' +
+        '<span data-tooltip="' + esc(authTip) + '">' + cvAuth + (cvAuth === 1 ? ' author' : ' authors') + '</span>' +
+      '</span>' +
     '</div>';
   }
 
@@ -739,6 +779,13 @@ function buildRowsHtml(coin) {
       'Long/short ratio of top-account traders, compared to the market\'s own recent range.',
       whaleVal,
       whaleTip, '');
+  } else if (coin.futures && coin.futures.reason === 'no_contract') {
+    // Spot-only coin: no perpetual futures contract on Binance.
+    html += dataRow('Derivatives',
+      'Funding, open interest, and whale positioning come from perpetual futures. This coin is spot-only on Binance (no futures contract), so those are unavailable.',
+      'No futures contract',
+      'Spot-only on Binance — no perpetual futures market exists for this coin.',
+      'na');
   }
 
   return html;
@@ -1012,7 +1059,7 @@ function updateFooter() {
     if (footerActiveCountEl) {
       footerActiveCountEl.textContent = n > 0
         ? n + ' coins are Spiking right now.'
-        : 'All 257 coins tracked.';
+        : 'All 250+ coins tracked.';
     }
     if (footerCtaEl)     { footerCtaEl.textContent = 'Pro plan active'; footerCtaEl.style.pointerEvents = 'none'; }
     if (footerRestoreEl) footerRestoreEl.classList.add('hidden');
@@ -1022,10 +1069,10 @@ function updateFooter() {
   if (footerActiveCountEl) {
     footerActiveCountEl.textContent = n > 0
       ? n + ' coins are Spiking right now.'
-      : 'Track all 257 coins to get notified the moment they spike.';
+      : 'Track all 250+ coins to get notified the moment they spike.';
   }
   if (footerCtaEl) {
-    footerCtaEl.textContent = n > 0 ? 'Unlock all 257 \u2192' : 'Go Pro \u2192';
+    footerCtaEl.textContent = n > 0 ? 'Unlock all 250+ \u2192' : 'Go Pro \u2192';
     footerCtaEl.style.pointerEvents = '';
   }
   if (footerRestoreEl) footerRestoreEl.classList.remove('hidden');
@@ -1123,7 +1170,7 @@ function renderPickerList(filter) {
     if (isTarget && !upgradeInserted) {
       upgradeInserted = true;
       html += '<div class="upgrade-prompt" id="upgrade-prompt">' +
-        'You\'re tracking 2 coins. <strong>Go Pro to track all 257</strong>' +
+        'You\'re tracking 2 coins. <strong>Go Pro to track all 250+</strong>' +
         ' &mdash; including <strong>' + activeCount + '</strong> currently active.' +
         ' <a href="#" class="upgrade-link">Upgrade &rarr;</a>' +
         '</div>';
@@ -1242,6 +1289,13 @@ function selectSearchCoin(symbol) {
 // Tooltip date label for a single bar
 // X-axis labels. posHint: 'first' or 'last' to pick start/end of week range.
 // ── HTML escape ───────────────────────────────────────────────────────
+// Compact count: 1.2M / 45.3K / 812
+function fmtCount(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(Math.round(n));
+}
+
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')

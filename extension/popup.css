@@ -500,7 +500,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .scale-step {
@@ -530,7 +530,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .coin-symbol {
@@ -721,16 +721,16 @@ body {
   flex-direction: column;
   justify-content: flex-start;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 6px;
-  margin-top: 4px;
-  margin-bottom: 4px;
+  padding-top: 4px;
+  margin-top: 2px;
+  margin-bottom: 2px;
 }
 
 .data-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  padding: 3px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -750,6 +750,7 @@ body {
 
 .row-value.tone-positive { color: var(--tone-positive); }
 .row-value.tone-negative { color: var(--tone-negative); }
+.row-value.na { color: var(--text-muted); }
 
 /* Tone colors usable anywhere (overlay text, etc.) */
 strong.tone-positive { color: var(--tone-positive); }
@@ -812,6 +813,12 @@ strong.tone-mixed    { color: var(--text-secondary); }
 /* Row-value tooltip: anchor from right edge of the value */
 .row-value[data-tooltip]::after {
   right: 0;
+}
+
+/* Tooltips on parts of a row value (e.g. "25 posts · 18 authors"): same right anchor */
+.row-value span[data-tooltip]::after {
+  right: 0;
+  left: auto;
 }
 
 /* Spark bar CSS tooltips disabled - JS tooltip used instead (overflow:hidden clips ::after) */
@@ -942,8 +949,8 @@ strong.tone-mixed    { color: var(--text-secondary); }
 
 .narrative-area {
   border-top: 1px solid var(--border-subtle);
-  margin-top: 4px;
-  padding-top: 4px;
+  margin-top: 2px;
+  padding-top: 3px;
   min-height: 0;
   flex-shrink: 0;
 }

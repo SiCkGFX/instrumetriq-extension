@@ -13,7 +13,7 @@
     <div class="toggle-group">
       <div class="pill-toggle">
         <div class="pill-option active" data-tooltip="Badge reflects activity on your tracked coins only.">My coins</div>
-        <div class="pill-option" data-tooltip="Badge reflects activity across all 278 tracked coins.">All coins</div>
+        <div class="pill-option" data-tooltip="Badge reflects activity across all 250+ tracked coins.">All coins</div>
       </div>
     </div>
     <div class="toggle-group">
@@ -77,7 +77,7 @@
   <footer class="footer">
     <div class="footer-col footer-col-left">
       <p class="footer-active-count">7 coins are Spiking right now.</p>
-      <a class="footer-cta" href="#">Unlock all 257 &#x2192;</a>
+      <a class="footer-cta" href="#">Unlock all 250+ &#x2192;</a>
       <a class="footer-restore hidden" href="#">Already paid? Restore</a>
     </div>
     <div class="footer-col footer-col-right">
@@ -105,7 +105,7 @@
       <div class="overlay-disclaimer">
         <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action. Always do your own research.
       </div>
-      <p class="overlay-subtext">Data updates every ~3 hours. Free tier: 2 coins. Pro: all 257 coins.</p>
+      <p class="overlay-subtext">Data updates roughly every 50 minutes. Free tier: 2 coins. Pro: all 250+ coins.</p>
       <button class="overlay-cta-btn" id="onboarding-continue">Choose my coins &rarr;</button>
     </div>
   </div>
@@ -178,13 +178,13 @@
       </div>
 
       <p class="overlay-section-label">The chart</p>
-      <p class="overlay-body">Each bar on the chart represents one data cycle (between every 2-4 hours). A taller bar means the coin received more engagement (likes, retweets, reach) during that cycle.</p>
+      <p class="overlay-body">Each bar on the chart represents one update window - about 2 hours in the default Cycle view. A taller bar means the coin received more engagement (likes, retweets, reach) during that window.</p>
       <p class="overlay-body">The bar color shows the tone shift: <strong class="tone-positive">green</strong> when sentiment is more positive than usual for this coin (shift above +8), <strong class="tone-negative">red</strong> when more negative than usual (shift below -8), and <strong class="tone-mixed">grey</strong> when near the coin's own baseline or when data is insufficient.</p>
 
       <p class="overlay-section-label">Chart timeframes</p>
       <p class="overlay-body">Use the <strong>C / D / W</strong> buttons above the chart to switch between three views of the same underlying data:</p>
       <ul class="overlay-privacy-list">
-        <li><strong>C (Cycle)</strong> - one bar per data cycle, covering the last 7 days. This is the most granular view and the default.</li>
+        <li><strong>C (Cycle)</strong> - one bar per ~2-hour window, covering the last 7 days. This is the most granular view and the default.</li>
         <li><strong>D (Day)</strong> - one bar per calendar day, covering the last 30 days. Each bar is the average engagement for that day. Today's bar updates with each new cycle.</li>
         <li><strong>W (Week)</strong> - one bar per week, covering the last 4 weeks. Each bar is the average engagement across a full 7-day window.</li>
       </ul>
@@ -199,6 +199,7 @@
         <li>We divide by the <strong>number of posts</strong> so a coin with 5 very popular posts scores higher than one with 50 posts that nobody noticed.</li>
       </ul>
       <p class="overlay-body">In short: <em>EC tells you how much engagement each post is getting, adjusted for the audience size of the people talking.</em></p>
+      <p class="overlay-body">The <strong>Chatter volume</strong> row on each card shows the raw inputs - posts and unique authors in the last update window. Hover them for the likes, retweets, and combined follower reach behind the numbers, and hover the row label for the EC value and its multiple of the coin's 30-day average.</p>
 
       <p class="overlay-section-label">Why the chart uses a log scale</p>
       <p class="overlay-body">A coin can fluctuate between EC 0 (nobody talked about it) and EC 20,000+ (a viral spike) across the same chart. If we drew the bars on a plain linear scale, a single spike would make every other bar invisible.</p>
@@ -233,7 +234,7 @@
       </ul>
       <p class="overlay-body">The color reflects the label: <strong class="tone-positive">green</strong> for Positive and above, <strong class="tone-negative">red</strong> for Negative and below, and <strong class="tone-mixed">grey</strong> for Neutral.</p>
       <p class="overlay-body">This is the same logic used for Chatter Level (EC vs 30-day mean) - relative to the coin's own history, not absolute numbers.</p>
-      <p class="overlay-body">Tone is only shown when we have enough data to be confident (at least 5 posts and high model confidence). Coins with fewer than 30 historical readings show a simplified raw net label while their baseline builds up.</p>
+      <p class="overlay-body">Tone is only shown when we have enough data to be confident (at least 4 posts and high model confidence). When it can't be shown, the label says why: <strong>Too few posts</strong> (under 4 posts - note that a couple of viral posts can spike the chatter level while still being too few to read tone from), <strong>Unclear tone</strong> (enough posts, but the language was too ambiguous to classify confidently), or <strong>Awaiting fresh data</strong>. Coins with fewer than 30 historical readings show a simplified raw net label while their baseline builds up.</p>
 
       <p class="overlay-section-label">Derivatives data</p>
       <p class="overlay-body">Funding, OI flow, and Whale lean come from Binance perpetual futures contracts.</p>
@@ -242,6 +243,11 @@
         <li><strong>OI flow</strong> - whether new money is entering (OI rising) or leaving (OI falling) derivatives.</li>
         <li><strong>Whale lean</strong> - which direction the largest traders are positioned, relative to the market.</li>
       </ul>
+      <p class="overlay-body">A few coins are spot-only on Binance and have no perpetual futures market - for those, these three rows show "No futures contract" instead.</p>
+
+      <p class="overlay-section-label">The "updated X ago" time</p>
+      <p class="overlay-body">Each update is one full sweep of every tracked coin, paced over roughly 40 minutes to stay within exchange API limits. The timestamp counts from the moment the sweep <em>began</em>, so by the time a sweep's data is processed and delivered it reads about 55 minutes old, then climbs until the next sweep lands - typically between <strong>55 minutes and 1 hour 35 minutes</strong>.</p>
+      <p class="overlay-body">All coins share the same sweep, which is why they all show the same time. If the counter grows far beyond that range, the feed is delayed - the toolbar badge turns amber until it recovers.</p>
 
       <div class="overlay-disclaimer">
         <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action.
@@ -279,6 +285,7 @@
 
   <script src="extensionpay.js"></script>
   <script src="sparkline-core.js"></script>
+  <script src="content.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

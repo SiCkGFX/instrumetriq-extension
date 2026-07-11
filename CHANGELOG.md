@@ -14,9 +14,21 @@ All notable changes to Instrumetriq will be documented here.
 ### Changed
 - AI narrative prompt rewritten (v2). The prompt now uses a system + user message split and instructs the model to produce exactly 2 sentences: one synthesising the social picture (chatter level, tone direction, author count), one interpreting what the derivatives signals suggest as a whole rather than listing funding, OI, and whale lean separately. Tone shift magnitude is pre-interpreted in the data layer before the model sees it: under 5 points = "essentially unchanged" (no directional language), 5-15 = mild, 15-30 = notable, 30+ = sharp. max_completion_tokens reduced from 120 to 100. No extension-side changes required - narratives are generated server-side by the Cloudflare Worker and cached in KV.
 
-## [Unreleased] - Extension (targets v1.0.13, not yet submitted to stores)
+## [Unreleased] - Extension (targets v1.0.14, not yet submitted to stores)
+
+### Removed
+- The `scripting` permission. Coin detection no longer injects a script into trading pages: the popup reads the active tab's URL directly (granted by `activeTab` when you click the icon) and parses it locally. Same feature, smaller permission footprint. (The only script that still runs on any page is the manifest-declared ExtensionPay helper on extensionpay.com, used for payments.)
+
+### Fixed
+- Notifications: a coin that stays Buzzing/Spiking across multiple data cycles now alerts only once per hot-spell (it can alert again after cooling down). Previously it re-alerted every cycle, which would have been spammy at the new ~40-minute cadence.
+
+### Added
+- New "Chatter volume" row: posts and unique authors for the last update window. Hovering the numbers reveals the engagement behind them (likes + retweets, combined follower reach), and hovering the label shows the raw engagement coefficient and its multiple of the coin's own 30-day average.
+- Spot-only coins (no Binance perpetual futures market) now show a "No futures contract" row instead of silently omitting Funding / OI flow / Whale lean. Also noted in "How it works".
+- Tone labels now say why tone is hidden: "Too few posts" (a couple of viral posts can spike the chatter level while being too few to read tone from), "Unclear tone" (ambiguous language), or "Awaiting fresh data" - instead of a blanket "Insufficient data". The post threshold for tone was tuned from 5 to 4.
 
 ### Changed
+- Copy refresh: coin counts now say "250+" (universe grew to 272); onboarding says data updates roughly every 50 minutes (was "~3 hours"); chart help describes ~2-hour bars.
 - Chatter sparkline now adapts to higher-frequency data. When updates arrive more often than ~90 minutes apart, the per-cycle ("C") view groups bars into ~2-hour windows so the chart stays readable instead of collapsing into slivers — while the newest bar is always shown on its own, so it reflects the very latest update and its color matches the Chatter tone. Hovering a bar now shows the exact time (or time range) it covers. No visible change on the current feed; this takes effect when the faster data feed goes live.
 
 ## [1.0.12] - 2026-03-30

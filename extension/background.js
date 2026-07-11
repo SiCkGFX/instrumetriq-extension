@@ -178,8 +178,12 @@ function updateBadge(payload, trackedCoins, badgeMode) {
   }
 }
 
-// ── Aggregated desktop notification (one per cycle) ───────────────────
-function maybeNotify(payload, trackedCoins) {
+// ── Aggregated desktop notification: one alert per coin per hot-spell ──
+// Only announces coins that JUST became Buzzing/Spiking (weren't hot last
+// cycle). A coin that stays hot across cycles is announced once, not every
+// cycle - important now that cycles are ~40min, not ~3h. `notifiedHot` holds
+// the currently-hot tracked symbols; a coin can alert again after it cools.
+async function maybeNotify(payload, trackedCoins) {
   const coinMap = {};
   (payload.coins ?? []).forEach(c => { coinMap[c.symbol] = c; });
 
@@ -189,11 +193,21 @@ function maybeNotify(payload, trackedCoins) {
       (c.chatter.level === 'Buzzing' || c.chatter.level === 'Spiking');
   });
 
-  if (!active.length) return;
+  const { notifiedHot } = await chrome.storage.local.get('notifiedHot');
+  const prevHot = new Set(notifiedHot ?? []);
 
-  const msg = active.length === 1
-    ? active[0] + ' is getting unusual chatter right now.'
-    : active.slice(0, -1).join(', ') + ' and ' + active[active.length - 1] +
+  // Newly hot this cycle = currently hot AND not already announced.
+  const newly = active.filter(sym => !prevHot.has(sym));
+
+  // Persist the current hot set: still-hot coins won't re-fire; coins that
+  // cooled drop out and may alert again next time they heat up.
+  await chrome.storage.local.set({ notifiedHot: active });
+
+  if (!newly.length) return;
+
+  const msg = newly.length === 1
+    ? newly[0] + ' is getting unusual chatter right now.'
+    : newly.slice(0, -1).join(', ') + ' and ' + newly[newly.length - 1] +
       ' are getting unusual chatter right now.';
 
   chrome.notifications.create('instrumetriq-alert', {
