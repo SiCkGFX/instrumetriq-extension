@@ -1,52 +1,54 @@
 {
   "manifest_version": 3,
   "name": "Instrumetriq - Crypto Sentiment & Market Pulse",
-  "version": "1.0.14",
-  "description": "X (Twitter) chatter levels and tone shifts for 250+ crypto coins. Funding rates, open interest, and whale positioning - one popup.",
-
+  "version": "2.0.0",
+  "description": "See which crypto coins are suddenly drawing unusual conversation on X, and what people are saying about them.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16":  "icons/icon16.png",
-      "48":  "icons/icon48.png",
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
-
   "background": {
     "service_worker": "background.js"
   },
-
   "permissions": [
     "alarms",
     "storage",
-    "notifications",
     "activeTab"
   ],
-
+  "optional_permissions": [
+    "notifications"
+  ],
   "host_permissions": [
-    "https://api.instrumetriq.com/*",
     "https://extensionpay.com/*"
   ],
-
   "web_accessible_resources": [
     {
-      "resources": ["extensionpay.js"],
-      "matches": ["https://extensionpay.com/*"]
+      "resources": [
+        "extensionpay.js"
+      ],
+      "matches": [
+        "https://extensionpay.com/*"
+      ]
     }
   ],
-
   "content_scripts": [
     {
-      "matches": ["https://extensionpay.com/*"],
-      "js": ["extensionpay.js"],
+      "matches": [
+        "https://extensionpay.com/*"
+      ],
+      "js": [
+        "extensionpay.js"
+      ],
       "run_at": "document_start"
     }
   ],
-
   "icons": {
-    "16":  "icons/icon16.png",
-    "48":  "icons/icon48.png",
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
 }

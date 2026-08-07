@@ -70,6 +70,25 @@ def bundle_background():
     return bundled
 
 
+# Store field limits. The Chrome Web Store REJECTS the upload rather than warning,
+# and it is the manifest `description`, not the listing description, that trips it.
+# Shipped 2.0.0 at 140 chars once and had the upload bounced.
+FIELD_LIMITS = {"name": 75, "description": 132}
+FIREFOX_FIELD_LIMITS = {"name": 45, "description": 132}
+
+
+def check_manifest_limits(manifest_text, limits, target):
+    m = json.loads(manifest_text)
+    for field, cap in limits.items():
+        v = m.get(field) or ""
+        if len(v) > cap:
+            raise SystemExit(
+                f"manifest {field!r} is {len(v)} chars, {target} allows {cap}.\n"
+                f"  {v}\n"
+                f"  Shorten it in extension/manifest.json before building."
+            )
+
+
 def patch_manifest_firefox(manifest_text):
     """Adapt Chrome manifest.json for Firefox MV3."""
     m = json.loads(manifest_text)
@@ -103,25 +122,22 @@ def build_source_zip():
     """
     output = os.path.join(REPO, 'instrumetriq-source.zip')
 
-    # Files/dirs to include relative to REPO root
-    source_files = [
-        'README.md',
-        'scripts/build_zip.py',
-        'extension/manifest.json',
-        'extension/popup.html',
-        'extension/popup.css',
-        'extension/popup.js',
-        'extension/content.js',
-        'extension/background.js',
-        'extension/extensionpay.js',
-        'extension/icons/icon16.png',
-        'extension/icons/icon48.png',
-        'extension/icons/icon128.png',
-        'extension/icons/instrumetriq-logo.svg',
-    ]
+    # DERIVED from INCLUDE so the two cannot drift. A hand-maintained copy of this
+    # list silently lost sparkline-core.js when it was added in 1.0.13, so the AMO
+    # source zip could not rebuild the artifact it was submitted alongside, which
+    # is the one thing that zip exists to do.
+    #
+    # background.js is added separately: INCLUDE omits it because the extension zip
+    # gets the BUNDLED version, while reviewers need the original plus the
+    # concatenation step in build_zip.py.
+    source_files = (
+        ['README.md', 'scripts/build_zip.py']
+        + ['extension/' + rel for rel in INCLUDE]
+        + ['extension/background.js']
+    )
 
     placeholder_secrets = (
-        "// secrets.js — fill in your values before running build_zip.py\n"
+        "// secrets.js, fill in your values before running build_zip.py\n"
         "// BEARER_TOKEN is the API token for api.instrumetriq.com\n"
         "const BEARER_TOKEN = 'REPLACE_WITH_BEARER_TOKEN';\n"
     )
@@ -163,8 +179,13 @@ def build_zip(target):
         if target == 'firefox':
             manifest_path = os.path.join(tmp, 'manifest.json')
             original = read(os.path.join(SRC, 'manifest.json'))
+            patched = patch_manifest_firefox(original)
+            check_manifest_limits(patched, FIREFOX_FIELD_LIMITS, 'AMO')
             with open(manifest_path, 'w', encoding='utf-8') as f:
-                f.write(patch_manifest_firefox(original))
+                f.write(patched)
+        else:
+            check_manifest_limits(read(os.path.join(SRC, 'manifest.json')),
+                                  FIELD_LIMITS, 'the Chrome Web Store')
 
         if os.path.exists(output):
             os.remove(output)

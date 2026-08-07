@@ -12,12 +12,12 @@
   <header class="header">
     <div class="toggle-group">
       <div class="pill-toggle">
-        <div class="pill-option active" data-tooltip="Badge reflects activity on your tracked coins only.">My coins</div>
-        <div class="pill-option" data-tooltip="Badge reflects activity across all 250+ tracked coins.">All coins</div>
+        <div class="pill-option active" data-tooltip="Badge reflects unusual attention on your tracked coins only.">My coins</div>
+        <div class="pill-option" data-tooltip="Badge reflects unusual attention across all 270+ tracked coins.">All coins</div>
       </div>
     </div>
     <div class="toggle-group">
-      <div class="switch-toggle off" data-tooltip="Get a browser notification when any of your tracked coins starts Buzzing or Spiking. One alert per update cycle - never spam.">
+      <div class="switch-toggle off" data-tooltip="Get a browser notification when one of your tracked coins starts getting unusual posting attention. One alert per coin per spell - never repeated while it stays busy.">
         <div class="switch-knob"></div>
       </div>
       <span class="switch-label">Alerts</span>
@@ -31,7 +31,13 @@
     </div>
   </header>
 
-  <!-- ── Coin navigation bar ──────────────────────────────────── -->
+  <!-- ── Universe strip: everything here is about ALL coins. It sits above
+       the coin navigation so the popup reads top-to-bottom as
+       "all coins" -> "this coin", instead of interrupting the coin's own
+       section with unrelated data. ──────────────────────────────────── -->
+  <div class="zone-universe" id="zone-universe"></div>
+
+  <!-- ── Coin navigation bar: everything BELOW here is about one coin ──── -->
   <nav class="coin-nav">
     <button class="nav-arrow" id="nav-prev" data-tooltip="Previous coin">&#x2039;</button>
     <div class="nav-center">
@@ -54,7 +60,6 @@
     <div class="search-dropdown hidden" id="search-dropdown"></div>
   </div>
 
-  <!-- ── Card area: populated by popup.js ──────────────────────────── -->
   <div class="card-area" id="card-area"></div>
 
 
@@ -73,11 +78,21 @@
     <button class="plan-choice-close" id="plan-choice-close">Cancel</button>
   </div>
 
+  <!-- ── Status bar ───────────────────────────────────────────────
+       Sits OUTSIDE .card-area, directly on top of the footer, so the
+       disclaimer and the freshness stamp keep a fixed position no matter how
+       tall the card content grows. Inside the card they rode on the rows and
+       kept being pushed behind the footer. -->
+  <div class="status-bar">
+    <span class="status-disclaimer">Social conversation only. Not a trading signal.</span>
+    <span class="updated-ago" id="status-updated" data-tooltip="Data arrives in full sweeps of all coins, paced to stay inside the API limits of the sources we read. All coins update together."></span>
+  </div>
+
   <!-- ── Footer ───────────────────────────────────────────────── -->
   <footer class="footer">
     <div class="footer-col footer-col-left">
-      <p class="footer-active-count">7 coins are Spiking right now.</p>
-      <a class="footer-cta" href="#">Unlock all 250+ &#x2192;</a>
+      <p class="footer-active-count"></p>
+      <a class="footer-cta" href="#">Unlock all 270+ &#x2192;</a>
       <a class="footer-restore hidden" href="#">Already paid? Restore</a>
     </div>
     <div class="footer-col footer-col-right">
@@ -95,17 +110,18 @@
     <div class="overlay-inner">
       <div class="overlay-logo"><img src="icons/instrumetriq-logo.svg" alt="Instrumetriq" height="28"></div>
       <h1 class="overlay-title">Welcome to Instrumetriq</h1>
-      <p class="overlay-body">See what the crowd on X (Twitter) is saying about any crypto coin - and how derivatives traders are positioned - all while you're on your trading page.</p>
+      <p class="overlay-body">See what people on X (Twitter) are actually saying about any crypto coin, while you're on your trading page.</p>
       <ul class="overlay-feature-list">
-        <li><strong>Chatter level</strong> - is this coin Quiet, Active, Buzzing, or Spiking vs its own 30-day average?</li>
-        <li><strong>Chatter tone</strong> - how this coin's sentiment compares to its own 30-day average. Shows whether the mood has shifted.</li>
-        <li><strong>Funding, OI flow, Whale lean</strong> - how derivatives traders are positioned right now.</li>
-        <li><strong>Context-aware</strong> - opens to the coin you're looking at on Binance, TradingView, or Bybit.</li>
+        <li><strong>Latest update</strong>: how many accounts posted in the most recent update window, against this coin's own usual rate. It carries the time it was collected, so you always know how fresh it is.</li>
+        <li><strong>Last 24 hours</strong>: tone, topics, who's posting and volume. A single update is often only a handful of posts, too few to read anything into. A day is enough to be meaningful.</li>
+        <li><strong>Discussed</strong>: the topics coming up: hype, fear, scam talk, memes.</li>
+        <li><strong>Context-aware</strong>: opens to the coin you're looking at on Binance, TradingView, or Bybit.</li>
       </ul>
+      <p class="overlay-subtext">The chart works the same way: switch between per-update, daily and weekly bars with the buttons above it.</p>
       <div class="overlay-disclaimer">
-        <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action. Always do your own research.
+        <strong>This is not a trading signal.</strong> Instrumetriq describes social conversation only. It does not predict, forecast, or recommend any action. Always do your own research.
       </div>
-      <p class="overlay-subtext">Data updates roughly every 50 minutes. Free tier: 2 coins. Pro: all 250+ coins.</p>
+      <p class="overlay-subtext">Data updates roughly once an hour. Free tier: 2 coins. Pro: all 270+ coins.</p>
       <button class="overlay-cta-btn" id="onboarding-continue">Choose my coins &rarr;</button>
     </div>
   </div>
@@ -177,85 +193,61 @@
         <button class="overlay-close-btn" id="methodology-close">&#x2715;</button>
       </div>
 
-      <p class="overlay-section-label">The chart</p>
-      <p class="overlay-body">Each bar on the chart represents one update window - about 2 hours in the default Cycle view. A taller bar means the coin received more engagement (likes, retweets, reach) during that window.</p>
-      <p class="overlay-body">The bar color shows the tone shift: <strong class="tone-positive">green</strong> when sentiment is more positive than usual for this coin (shift above +8), <strong class="tone-negative">red</strong> when more negative than usual (shift below -8), and <strong class="tone-mixed">grey</strong> when near the coin's own baseline or when data is insufficient.</p>
+      <h2 class="overlay-subtitle">What this is</h2>
+      <p class="overlay-body">Instrumetriq watches what people post on X about 270+ crypto coins and describes the conversation: how many accounts are talking, how the tone splits, and what topics come up. It describes what is being said. It does not tell you what a price will do.</p>
 
-      <p class="overlay-section-label">Chart timeframes</p>
-      <p class="overlay-body">Use the <strong>C / D / W</strong> buttons above the chart to switch between three views of the same underlying data:</p>
-      <ul class="overlay-privacy-list">
-        <li><strong>C (Cycle)</strong> - one bar per ~2-hour window, covering the last 7 days. This is the most granular view and the default.</li>
-        <li><strong>D (Day)</strong> - one bar per calendar day, covering the last 30 days. Each bar is the average engagement for that day. Today's bar updates with each new cycle.</li>
-        <li><strong>W (Week)</strong> - one bar per week, covering the last 4 weeks. Each bar is the average engagement across a full 7-day window.</li>
+      <h2 class="overlay-subtitle">Two speeds, and why</h2>
+      <p class="overlay-body">The card is split. <strong>Latest update</strong> is the most recent collection window, and shows how long ago it ran. <strong>Last 24 hours</strong> is everything below the divider.</p>
+      <p class="overlay-body">We would show everything live if the data supported it, but it does not. A single update window is often only a handful of posts for a given coin, too few to read a tone from without one loud post swinging it. Counting accounts works fine on a small sample, so attention is live; tone, topics and reach need a day to mean anything.</p>
+      <p class="overlay-body">The chart follows the same idea: switch it to per-update bars to see the freshest detail, or leave it on days for the shape over time.</p>
+
+      <h2 class="overlay-subtitle">Attention</h2>
+      <p class="overlay-body">The headline number on each coin. We count how many <em>distinct accounts</em> posted about it in the latest update window, then compare that to the median of its own recent windows.</p>
+      <p class="overlay-body">A coin at 1&times; is posting at its usual rate. At 6&times; or more we mark it <strong>unusual attention</strong>, which happens to roughly one coin in a hundred at any moment. That rarity is the point: if the badge appeared constantly it would tell you nothing.</p>
+      <p class="overlay-body">We count accounts rather than posts on purpose. Fifty posts from one person is one person; five posts from five people is a conversation.</p>
+
+      <h2 class="overlay-subtitle">Tone of posts</h2>
+      <p class="overlay-body">Every post is read by two language models. We report the split, what share came out positive, neutral and negative, and a plain label for that mix.</p>
+      <p class="overlay-body">Tone describes the <em>language people used</em>. It is not a direction, a target or a suggestion. A coin can be discussed in overwhelmingly positive terms while its price falls, and often is.</p>
+      <p class="overlay-body">We only show tone when at least five posts were scored. Below that there is nothing meaningful to average.</p>
+
+      <h2 class="overlay-subtitle">How clear-cut</h2>
+      <p class="overlay-body">How consistently our scoring landed. <strong>Clear</strong> means the models were confident and aligned. <strong>Mixed</strong> means confidence varied widely across posts. <strong>Unclear</strong> means our two models disagreed on a meaningful share of them. It tells you how much weight the tone reading deserves.</p>
+      <p class="overlay-body">It needs the same five scored posts that tone does, but it is measured separately, so it can be available when tone is not.</p>
+
+      <h2 class="overlay-subtitle">Discussed</h2>
+      <p class="overlay-body">Topics drawn from a curated crypto vocabulary, hype, fear, scam talk, memes, and general positive or negative language, with the words that triggered them.</p>
+      <p class="overlay-body">This is deliberately kept <em>separate</em> from tone, and the two can look like they disagree. A conversation can be broadly positive while people also discuss risks; the words &ldquo;not a scam&rdquo; contain the word scam. Roughly two thirds of posts contain none of this vocabulary at all, so we show how many posts the topics were drawn from: it is the same figure as the <strong>Posts</strong> row, and hovering <strong>Discussed</strong> repeats it. The number beside each topic is how many matching words were found rather than how many posts, since one post can contribute several.</p>
+      <p class="overlay-body">Only curated vocabulary appears here. We never surface raw hashtags, @mentions or links.</p>
+
+      <h2 class="overlay-subtitle">Who&rsquo;s posting</h2>
+      <p class="overlay-body">Distinct accounts over the last 24 hours, and at least how many carried a verified badge. The verified figure is written as &ldquo;60+&rdquo; because verified accounts cannot be matched up across separate update windows: it is the count from the busiest single window, so the true figure over the day may be higher.</p>
+      <p class="overlay-body">We never publish account names, account IDs or post IDs, only counts and aggregates.</p>
+
+      <h2 class="overlay-subtitle">The chart</h2>
+      <p class="overlay-body">Each bar shows how many distinct accounts posted, and its colour shows the tone of those posts, green when more positive than this coin&rsquo;s own baseline, red when more negative, grey when near it or when there is too little to say.</p>
+      <p class="overlay-body">The three buttons switch between one bar per update, per day and per week. <strong>Day is the default</strong>: most coins are too quiet for a single update window to say much, but busy enough over a full day.</p>
+      <p class="overlay-body">Bar height is the average across the windows in which a coin was actually being discussed, so a coin talked about in two windows is not flattened by the twenty-five quiet ones around it. How often it was discussed is shown by how many bars there are.</p>
+      <p class="overlay-body">The scale is logarithmic. A viral moment can be thousands of times a quiet stretch, and on a plain scale everything else would vanish.</p>
+
+      <h2 class="overlay-subtitle">Market conversation</h2>
+      <p class="overlay-body">At the top of the popup, how positive the conversation is across every tracked coin today, compared with the last 30 days. It is a daily average rather than a live reading. Hour to hour it is mostly noise, and it typically moves about a point a day.</p>
+
+      <h2 class="overlay-subtitle">Where the numbers come from</h2>
+      <p class="overlay-body">Posts are collected continuously and processed in full sweeps of every coin, paced to stay within the API limits of the sources we read. All coins update together, so a reading over an hour old is normal. Price and volume come from Binance.</p>
+
+      <h2 class="overlay-subtitle">Limits worth knowing</h2>
+      <ul class="overlay-list">
+        <li>Only English-language posts on X. Discussion elsewhere is invisible to us.</li>
+        <li>Automated and promotional posts are filtered, but no filter is perfect.</li>
+        <li>Quiet coins genuinely have little to report. We say so rather than inventing detail.</li>
+        <li>Nothing here is a price prediction, and none of it should be read as one.</li>
       </ul>
-      <p class="overlay-body">All three views use a rolling window anchored to today, so the chart always shows the most recent data available.</p>
 
-      <p class="overlay-section-label">Engagement Coefficient (EC)</p>
-      <p class="overlay-body">For each cycle we calculate an <strong>Engagement Coefficient</strong> - a single number that captures how much attention a coin is getting on X (Twitter).</p>
-      <p class="overlay-body" style="text-align:center; font-size:13px;"><strong>EC = (likes + retweets) x log(follower reach) / posts</strong></p>
-      <ul class="overlay-privacy-list">
-        <li>We add up the <strong>likes</strong> and <strong>retweets</strong> from all posts about this coin in the cycle.</li>
-        <li>We weigh that by the <strong>follower reach</strong> of the people posting - a post from a large account counts more than the same post from a tiny one.</li>
-        <li>We divide by the <strong>number of posts</strong> so a coin with 5 very popular posts scores higher than one with 50 posts that nobody noticed.</li>
-      </ul>
-      <p class="overlay-body">In short: <em>EC tells you how much engagement each post is getting, adjusted for the audience size of the people talking.</em></p>
-      <p class="overlay-body">The <strong>Chatter volume</strong> row on each card shows the raw inputs - posts and unique authors in the last update window. Hover them for the likes, retweets, and combined follower reach behind the numbers, and hover the row label for the EC value and its multiple of the coin's 30-day average.</p>
-
-      <p class="overlay-section-label">Why the chart uses a log scale</p>
-      <p class="overlay-body">A coin can fluctuate between EC 0 (nobody talked about it) and EC 20,000+ (a viral spike) across the same chart. If we drew the bars on a plain linear scale, a single spike would make every other bar invisible.</p>
-      <p class="overlay-body">Instead, we compress the bars using a <strong>logarithmic scale</strong>. Think of it like a volume knob: the difference between silence and a whisper is clearly visible, while the difference between loud and very loud is still shown, but does not wipe out everything else.</p>
-      <ul class="overlay-privacy-list">
-        <li><strong>Zero stays flat</strong> - if nobody talked about the coin, the bar is empty.</li>
-        <li><strong>Small values are visible</strong> - a quiet cycle still shows as a short bar.</li>
-        <li><strong>Huge spikes are tall but proportional</strong> - a viral moment is the tallest bar, but smaller bars remain readable.</li>
-      </ul>
-
-      <p class="overlay-section-label">Chatter level labels</p>
-      <p class="overlay-body">The label on each card (Quiet, Active, Buzzing, Spiking) compares the latest EC to this coin's own <strong>30-day average</strong>. Think of it as "how talkative is this coin right now compared to its usual self?"</p>
-      <ul class="overlay-privacy-list">
-        <li><strong>Quiet</strong> - less than half the usual level</li>
-        <li><strong>Active</strong> - around normal (0.5x - 2x average)</li>
-        <li><strong>Buzzing</strong> - noticeably above normal (2x - 6x average)</li>
-        <li><strong>Spiking</strong> - unusual attention (more than 6x average)</li>
-      </ul>
-
-      <p class="overlay-section-label">Chatter tone</p>
-      <p class="overlay-body">Crypto Twitter is structurally positive - most coins run 60-80% positive on a normal day. Absolute sentiment numbers are meaningless. What matters is whether sentiment has <strong>shifted</strong> relative to this coin's own baseline.</p>
-      <p class="overlay-body">For each cycle, we compute a <strong>raw net score</strong> (positive% minus negative%) and compare it to the coin's <strong>30-day rolling average</strong> of the same metric. The difference is the <strong>shift</strong>:</p>
-      <p class="overlay-body" style="text-align:center; font-size:13px;"><strong>shift = (current net) - (30-day average net)</strong></p>
-      <p class="overlay-body">If a coin normally runs at net +55 and today it's at net +35, the shift is <strong>-20</strong> - sentiment has dropped significantly below its usual level, even though the absolute numbers are still positive.</p>
-      <p class="overlay-body">The shift maps to a label:</p>
-      <ul class="overlay-privacy-list">
-        <li><strong>Above +16</strong> - Turning positive (well above this coin's usual level)</li>
-        <li><strong>+8 to +16</strong> - Leaning positive (moderately above baseline)</li>
-        <li><strong>-8 to +8</strong> - Steady (near baseline)</li>
-        <li><strong>-16 to -8</strong> - Leaning negative (moderately below baseline)</li>
-        <li><strong>Below -16</strong> - Turning negative (well below this coin's usual level)</li>
-      </ul>
-      <p class="overlay-body">The color reflects the label: <strong class="tone-positive">green</strong> for Positive and above, <strong class="tone-negative">red</strong> for Negative and below, and <strong class="tone-mixed">grey</strong> for Neutral.</p>
-      <p class="overlay-body">This is the same logic used for Chatter Level (EC vs 30-day mean) - relative to the coin's own history, not absolute numbers.</p>
-      <p class="overlay-body">Tone is only shown when we have enough data to be confident (at least 4 posts and high model confidence). When it can't be shown, the label says why: <strong>Too few posts</strong> (under 4 posts - note that a couple of viral posts can spike the chatter level while still being too few to read tone from), <strong>Unclear tone</strong> (enough posts, but the language was too ambiguous to classify confidently), or <strong>Awaiting fresh data</strong>. Coins with fewer than 30 historical readings show a simplified raw net label while their baseline builds up.</p>
-
-      <p class="overlay-section-label">Derivatives data</p>
-      <p class="overlay-body">Funding, OI flow, and Whale lean come from Binance perpetual futures contracts.</p>
-      <ul class="overlay-privacy-list">
-        <li><strong>Funding</strong> - shows whether leveraged longs or shorts are paying a premium to hold their positions.</li>
-        <li><strong>OI flow</strong> - whether new money is entering (OI rising) or leaving (OI falling) derivatives.</li>
-        <li><strong>Whale lean</strong> - which direction the largest traders are positioned, relative to the market.</li>
-      </ul>
-      <p class="overlay-body">A few coins are spot-only on Binance and have no perpetual futures market - for those, these three rows show "No futures contract" instead.</p>
-
-      <p class="overlay-section-label">The "updated X ago" time</p>
-      <p class="overlay-body">Each update is one full sweep of every tracked coin, paced over roughly 40 minutes to stay within exchange API limits. The timestamp counts from the moment the sweep <em>began</em>, so by the time a sweep's data is processed and delivered it reads about 55 minutes old, then climbs until the next sweep lands - typically between <strong>55 minutes and 1 hour 35 minutes</strong>.</p>
-      <p class="overlay-body">All coins share the same sweep, which is why they all show the same time. If the counter grows far beyond that range, the feed is delayed - the toolbar badge turns amber until it recovers.</p>
-
-      <div class="overlay-disclaimer">
-        <strong>This is not a trading signal.</strong> Instrumetriq shows social chatter and market positioning data only. It does not predict, forecast, or recommend any action.
-      </div>
+      <p class="overlay-body"><strong>This is not a trading signal.</strong> Instrumetriq describes social conversation only. It does not predict, forecast, or recommend any action, and nothing in it is financial advice. Data may be delayed.</p>
     </div>
   </div>
 
-  <!-- ── Coin picker panel: full-popup overlay ─────────────────────── -->
   <div class="picker-panel hidden" id="picker-panel">
     <div class="picker-header">
       <button class="picker-btn picker-close-btn" id="picker-close">&#x2715;</button>
@@ -273,10 +265,7 @@
     <!-- Sort chips: always visible -->
     <div class="picker-sort-chips" id="picker-sort-chips">
       <button class="sort-chip active" data-sort="alpha">A-Z</button>
-      <button class="sort-chip" data-sort="spiking">Spiking</button>
-      <button class="sort-chip" data-sort="buzzing">Buzzing</button>
-      <button class="sort-chip" data-sort="active">Active</button>
-      <button class="sort-chip" data-sort="quiet">Quiet</button>
+      <button class="sort-chip" data-sort="attention">Busiest</button>
     </div>
     <div class="coin-list" id="coin-list">
       <!-- Rows injected by JS -->

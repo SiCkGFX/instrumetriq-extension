@@ -1,0 +1,594 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Instrumetriq extension payload v2",
+  "description": "Descriptive social-sentiment payload. Written by scripts/build_payload_v2.py, served from api.instrumetriq.com. Contains no identifiers: author ids, usernames, tweet ids and raw post text are refused at ingest.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "pushed_at",
+    "feed_ok",
+    "cycle_minutes_approx",
+    "universe",
+    "coins"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "pushed_at": {
+      "type": "string",
+      "description": "ISO-8601 UTC, when this payload was built"
+    },
+    "feed_ok": {
+      "type": "boolean",
+      "description": "false when no coin has new data for 6h+"
+    },
+    "cycle_minutes_approx": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "observed median gap between cycles"
+    },
+    "builder_version": {
+      "type": "string"
+    },
+    "universe": {
+      "type": "object",
+      "description": "Zone A. Always populated, independent of which coins the user tracks.",
+      "required": [
+        "coins_tracked",
+        "active_coins",
+        "spiking",
+        "market"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "coins_tracked": {
+          "type": "integer"
+        },
+        "active_coins": {
+          "type": "integer",
+          "description": "coins with any posts in the latest complete day"
+        },
+        "spiking": {
+          "type": "integer",
+          "description": "coins currently at attention ratio >= 6"
+        },
+        "market": {
+          "type": "object",
+          "description": "Trailing DAILY average of the market-wide positive share. Never the latest cycle: day-to-day sd 1.04 vs within-day cycle sd 2.57, so a per-cycle reading is ~2.5x noise per 1x signal.",
+          "required": [
+            "value",
+            "pct_rank",
+            "days",
+            "trend"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "latest complete day's positive share, 0-100"
+            },
+            "pct_rank": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "percentile of `value` within the retained history"
+            },
+            "days": {
+              "type": "integer",
+              "description": "days of history behind pct_rank"
+            },
+            "trend": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "description": "daily series, oldest first"
+            },
+            "coins_in_index": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "unbalanced panel - composition varies by day"
+            }
+          }
+        },
+        "loudest": {
+          "type": "array",
+          "description": "Cross-sectional ranking by continuous attention ratio, gated on an absolute post floor so it cannot fill with 1-post microcaps.",
+          "items": {
+            "type": "object",
+            "required": [
+              "symbol",
+              "ratio",
+              "posts"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "ratio": {
+                "type": "number"
+              },
+              "state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "spike",
+                  "normal",
+                  "intermediate",
+                  null
+                ]
+              },
+              "posts": {
+                "type": "integer"
+              },
+              "authors": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "busy": {
+          "type": "integer",
+          "description": "Coins at >=1.5x their own recent normal. Populated every cycle, unlike `spiking` which fires on ~1% by design."
+        }
+      }
+    },
+    "coins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "quality"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "pair_symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "stale",
+              "no_data"
+            ]
+          },
+          "updated_ago_min": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UTC date of the summarised day"
+          },
+          "attention": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Published definition: distinct authors vs median of <=20 prior cycles (min 5), spike at >=6. Descriptive of unusual posting volume - carries no directional claim.",
+            "required": [
+              "ratio",
+              "state",
+              "silent"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "ratio": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "spike",
+                  "normal",
+                  "intermediate",
+                  null
+                ]
+              },
+              "pct_rank": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Share of tracked coins this one is strictly busier than, one decimal. Never 100: a coin cannot be busier than itself."
+              },
+              "silent": {
+                "description": "True when the latest cycle had no posts. ratio is 0 and state is null; the UI shows 'no posts' rather than a multiple.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "tone": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "DESCRIPTIVE ONLY. Shares of scored posts. Never rendered as a price direction.",
+            "required": [
+              "pos",
+              "neu",
+              "neg",
+              "posts",
+              "label",
+              "window"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pos": {
+                "type": "integer"
+              },
+              "neu": {
+                "type": "integer"
+              },
+              "neg": {
+                "type": "integer"
+              },
+              "posts": {
+                "type": "integer"
+              },
+              "label": {
+                "type": "string",
+                "enum": [
+                  "mixed",
+                  "leaning positive",
+                  "mostly positive",
+                  "leaning negative",
+                  "mostly negative"
+                ]
+              },
+              "window": {
+                "type": "string",
+                "enum": [
+                  "24h"
+                ],
+                "description": "Always 24h. Everything below the chart shares one window; only Attention is per-cycle."
+              }
+            }
+          },
+          "topics": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Lexicon categories - what is being DISCUSSED, independent of tone. Coverage is reported because ~65% of labelled posts contain no category vocabulary at all.",
+            "required": [
+              "items",
+              "coverage_matches",
+              "total_posts"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label",
+                    "count"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "enum": [
+                        "hype",
+                        "fear",
+                        "scam talk",
+                        "memes",
+                        "positive language",
+                        "negative language"
+                      ]
+                    },
+                    "count": {
+                      "type": "integer",
+                      "description": "Vocabulary MATCHES, not posts. One post can match several overlapping entries (\"strong\" and \"strong liquidity\" both fire on the same span), so this can exceed total_posts - measured on 23% of coin-cycles at scraper 0.8.0."
+                    },
+                    "terms": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "curated lexicon vocabulary only - never raw hashtags, mentions or URLs"
+                    }
+                  }
+                }
+              },
+              "coverage_matches": {
+                "type": "integer"
+              },
+              "total_posts": {
+                "type": "integer"
+              }
+            }
+          },
+          "crowd": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Aggregate description of who posted. No identifiers appear anywhere in this payload: author ids, usernames, tweet ids and raw post text are refused at ingest.",
+            "required": [
+              "authors",
+              "basis"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "authors": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Distinct accounts posting."
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "24h",
+                  "cycle"
+                ]
+              },
+              "blue": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "followers_median": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "followers_max": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "activity": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Descriptive line for quiet coins. `usual` is the coin's own recent daily posting.",
+            "required": [
+              "posts"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "posts": {
+                "type": "integer"
+              },
+              "authors": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "Distinct accounts posting."
+              },
+              "usual": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "relative": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "below",
+                  "typical",
+                  "above",
+                  null
+                ]
+              }
+            }
+          },
+          "market": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Two fields only. range_pct_24h is the honest companion to an attention spike - it is the reading with real ranking skill.",
+            "additionalProperties": false,
+            "properties": {
+              "range_pct_24h": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "chg_pct_24h": {
+                "description": "Signed 24h percent change. Separate from range_pct_24h, which is (high-low) and carries no direction.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "volume_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "volume_fmt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "volume_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "spark": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Per-cycle series. Timestamps are a base plus minute offsets rather than ISO strings - the v1 payload spent 1.79 MB (48.5%) on ISO timestamps alone.",
+            "required": [
+              "t0",
+              "dt",
+              "v"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "t0": {
+                "type": "string",
+                "description": "ISO-8601 base timestamp"
+              },
+              "dt": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "description": "minutes after t0"
+              },
+              "v": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "description": "distinct authors per cycle - same quantity the attention metric uses, so chart and badge agree"
+              },
+              "tone": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "pos": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "neg": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "reasons": {
+            "description": "Why a block is absent, so the card can explain the gap rather than silently dropping a row. Only present for blocks that are null.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "tone": {
+                "type": "string",
+                "enum": [
+                  "too_few_posts",
+                  "unclear"
+                ]
+              },
+              "topics": {
+                "type": "string",
+                "enum": [
+                  "no_posts",
+                  "no_matches"
+                ]
+              },
+              "crowd": {
+                "type": "string",
+                "enum": [
+                  "no_authors"
+                ]
+              },
+              "attention": {
+                "type": "string",
+                "enum": [
+                  "no_baseline"
+                ]
+              },
+              "conviction": {
+                "type": "string",
+                "enum": [
+                  "too_few_posts"
+                ]
+              }
+            }
+          },
+          "conviction": {
+            "description": "consistent | split | contested. Measured independently of tone: they share a 5-scored-post threshold but tone can fail on unusable ratios while this remains measurable.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "consistent",
+              "split",
+              "contested",
+              null
+            ]
+          }
+        }
+      }
+    }
+  }
+}

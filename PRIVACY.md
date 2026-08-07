@@ -8,7 +8,7 @@ Last updated: March 19, 2026
 ## Summary
 
 Instrumetriq does not collect, store, or transmit any personal information.
-It reads only what is strictly necessary to display market chatter data for the coins you choose to track.
+It reads only what is strictly necessary to show social conversation data for the coins you choose to track.
 
 ---
 
@@ -58,16 +58,40 @@ If you subscribe to Instrumetriq Pro, the extension contacts [ExtensionPay](http
 
 ## Permissions
 
+Taken from `extension/manifest.json`, which is in this repository and can be checked
+against this table.
+
 | Permission | Why it is needed |
 |---|---|
-| `alarms` | Schedules polling every ~2 hours using `chrome.alarms` (the correct MV3 approach - no background keep-alive) |
-| `storage` | Stores your preferences and the last payload locally on your device |
-| `notifications` | Sends a desktop alert when a tracked coin crosses into Buzzing or Spiking |
-| `activeTab` | Queries the active tab ID to ask the content script for the current coin symbol |
-| Host: `api.instrumetriq.com` | Fetches the market data payload |
-| Host: `extensionpay.com` | Verifies Pro subscription status |
+| `alarms` | Schedules a periodic check for new data using `chrome.alarms`, the standard approach for Manifest V3. No background process is kept alive. |
+| `storage` | Stores your preferences and the last received data locally on your device |
+| `activeTab` | When you click the icon, reads the address of the tab you are on so the popup can open to the coin you are looking at |
 
-The extension also injects a minimal content script on 25 supported trading and data sites. This script reads only `window.location.href` and responds to a single internal message from the popup. It performs no other action.
+### Requested only if you ask for it
+
+| Permission | Why it is needed |
+|---|---|
+| `notifications` | Desktop alerts when a tracked coin reaches unusual attention. This is an **optional** permission. Your browser will not ask for it at install, only if you switch alerts on, and revoking it stops the alerts without breaking anything else. |
+
+### Site access
+
+| Host | Why it is needed |
+|---|---|
+| `extensionpay.com` | Verifies Pro subscription status. This is the only site the extension has access to. |
+
+The data feed at `api.instrumetriq.com` is fetched **without** a host permission, using
+a standard cross-origin request. That is why the extension does not ask for access to
+any address outside `extensionpay.com`.
+
+### No content script on trading sites
+
+Earlier versions injected a small script into supported exchange pages to detect which
+coin you were viewing. That was removed in version 1.0.14. The extension now reads the
+tab's address directly when you click the icon, granted by `activeTab`, and works out
+the coin from the address alone.
+
+The only script the extension runs on any page is the payment helper on
+`extensionpay.com`.
 
 ---
 

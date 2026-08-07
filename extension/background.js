@@ -3,7 +3,8 @@
 importScripts('secrets.js');
 importScripts('extensionpay.js');
 
-const PAYLOAD_URL        = 'https://api.instrumetriq.com/data/extension_payload.json';
+const PAYLOAD_URL        = 'https://api.instrumetriq.com/data/extension_payload_v2.json';
+const PAYLOAD_SCHEMA     = 2;   // reject anything else rather than render it wrongly
 const ALARM_NAME         = 'instrumetriq-poll';
 const POLL_INTERVAL      = 5; // periodInMinutes
 const PRO_CACHE_TTL_MS   = 3_600_000; // 1 hour
@@ -19,12 +20,40 @@ extpay.onPaid.addListener(() => {
   chrome.storage.local.set({ isPro: true, proCachedAt: Date.now() });
 });
 
-// ── On first install: create alarm, fetch payload, check pro status ───
-chrome.runtime.onInstalled.addListener(() => {
+// ── On first install / update: migrate storage, then start polling ────
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === 'update') await migrateToV2();
   ensureAlarm();
   fetchPayload();
   checkProLicense();
 });
+
+// ── Storage migration, v1 -> v2 ───────────────────────────────────────
+// An upgrading user's chrome.storage.local holds v1-shaped state. The popup
+// renders from `lastPayload` on open, BEFORE the first poll returns, so without
+// this the first open after updating runs v2 code against a v1 payload.
+//
+// Clear only what is keyed to retired semantics. NEVER touch trackedCoins or
+// isPro: losing a Pro user's entitlement or their coin list on upgrade is the
+// worst outcome available here, and it is not recoverable client-side.
+async function migrateToV2() {
+  try {
+    const { lastPayload } = await chrome.storage.local.get('lastPayload');
+    if (lastPayload && lastPayload.schema_version === PAYLOAD_SCHEMA) return; // already v2
+
+    await chrome.storage.local.remove([
+      'lastPayload',        // v1 schema - popup would misread it
+      'lastPushedAt',       // paired with lastPayload; stale value suppresses alerts
+      'notifiedHot',        // keyed to the retired Buzzing/Spiking levels
+      'narrativeTexts',     // AI narrative retired in v2
+      'narrativePushedAt'
+    ]);
+    // trackedCoins, isPro, proCachedAt, badgeMode, notificationsEnabled: PRESERVED.
+  } catch (_e) {
+    // A failed migration must not brick startup - the schema guard in
+    // fetchPayload() still prevents a v1 payload from being rendered.
+  }
+}
 
 // ── On browser startup: re-create alarm if Chrome cleared it ─────────
 chrome.runtime.onStartup.addListener(() => {
@@ -49,6 +78,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return false;
     }
     _lastManualFetch = now;
+    // Repair a missing alarm while we are here. It is otherwise only created on
+    // install and browser startup, so if it is ever lost mid-session the poll
+    // stops until the browser restarts and the cache ages unbounded. Opening the
+    // popup is a good moment to check.
+    ensureAlarm();
     fetchPayload().then(() => sendResponse({ ok: true }));
     return true; // keep channel open for async response
   }
@@ -101,6 +135,11 @@ async function fetchPayload() {
     if (!res.ok) return;
 
     const payload = await res.json();
+
+    // Refuse a payload we do not understand. Rendering a v1-shaped payload with v2
+    // code produces silently wrong output rather than an error, so this fails
+    // closed: keep whatever is already cached and try again next alarm.
+    if (payload?.schema_version !== PAYLOAD_SCHEMA) return;
 
     // Batched read of all keys needed for badge and notification decisions
     const { trackedCoins, badgeMode, notificationsEnabled, lastPushedAt, isPro }
@@ -156,17 +195,13 @@ function updateBadge(payload, trackedCoins, badgeMode) {
   let active = false;
 
   if (badgeMode === 'all_coins') {
-    // Cyan whenever anything in the universe is Buzzing or Spiking
-    active = (payload.active_coin_count ?? 0) > 0;
+    // Cyan whenever anything in the universe is spiking
+    active = (payload.universe?.spiking ?? 0) > 0;
   } else {
     // my_coins (default): only reflect the user's tracked coins
     const coinMap = {};
     (payload.coins ?? []).forEach(c => { coinMap[c.symbol] = c; });
-    active = trackedCoins.some(sym => {
-      const c = coinMap[sym];
-      return c?.chatter?.ok &&
-        (c.chatter.level === 'Buzzing' || c.chatter.level === 'Spiking');
-    });
+    active = trackedCoins.some(sym => isSpiking(coinMap[sym]));
   }
 
   if (active) {
@@ -178,20 +213,25 @@ function updateBadge(payload, trackedCoins, badgeMode) {
   }
 }
 
+// ── Is this coin currently at an attention spike? ─────────────────────
+// v2 replaces the four-level chatter label with the published attention
+// definition: distinct authors >= 6x the median of up to 20 prior cycles.
+// It fires on ~1% of coin-cycles versus the old Buzzing+Spiking rate, so
+// ALERT VOLUME DROPS. That is intended - rarer alerts that mean something.
+function isSpiking(coin) {
+  return coin?.attention?.state === 'spike';
+}
+
 // ── Aggregated desktop notification: one alert per coin per hot-spell ──
-// Only announces coins that JUST became Buzzing/Spiking (weren't hot last
-// cycle). A coin that stays hot across cycles is announced once, not every
-// cycle - important now that cycles are ~40min, not ~3h. `notifiedHot` holds
-// the currently-hot tracked symbols; a coin can alert again after it cools.
+// Only announces coins that JUST started spiking (weren't spiking last cycle).
+// A coin that stays hot across cycles is announced once rather than every cycle,
+// important at ~40min cycles. `notifiedHot` holds the currently-hot tracked
+// symbols; a coin can alert again after it cools.
 async function maybeNotify(payload, trackedCoins) {
   const coinMap = {};
   (payload.coins ?? []).forEach(c => { coinMap[c.symbol] = c; });
 
-  const active = trackedCoins.filter(sym => {
-    const c = coinMap[sym];
-    return c?.chatter?.ok &&
-      (c.chatter.level === 'Buzzing' || c.chatter.level === 'Spiking');
-  });
+  const active = trackedCoins.filter(sym => isSpiking(coinMap[sym]));
 
   const { notifiedHot } = await chrome.storage.local.get('notifiedHot');
   const prevHot = new Set(notifiedHot ?? []);
@@ -205,10 +245,17 @@ async function maybeNotify(payload, trackedCoins) {
 
   if (!newly.length) return;
 
+  // `notifications` is optional in v2 and may have been revoked in browser
+  // settings after being granted. Check before firing rather than throwing.
+  if (chrome.permissions) {
+    const has = await chrome.permissions.contains({ permissions: ['notifications'] });
+    if (!has) return;
+  }
+
   const msg = newly.length === 1
-    ? newly[0] + ' is getting unusual chatter right now.'
+    ? newly[0] + ' is getting unusual posting attention.'
     : newly.slice(0, -1).join(', ') + ' and ' + newly[newly.length - 1] +
-      ' are getting unusual chatter right now.';
+      ' are getting unusual posting attention.';
 
   chrome.notifications.create('instrumetriq-alert', {
     type:    'basic',

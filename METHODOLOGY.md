@@ -1,219 +1,205 @@
 # Methodology
 
-How Instrumetriq computes the indicators shown in the extension popup.
+How Instrumetriq computes what the extension shows.
 
 ---
 
 ## Data source
 
-Instrumetriq processes posts from X (Twitter) about cryptocurrency coins. The pipeline
-collects posts matching known coin symbols and cashtags, then runs NLP analysis to
-classify tone and extract engagement metrics. Data refreshes every 2-4 hours.
+Instrumetriq reads public posts on X (Twitter) about the coins it tracks. A collection
+pass sweeps every coin in turn, roughly once an hour, and each pass is processed as one
+update window.
 
-The extension does not scrape, collect, or read any data from the pages you visit.
-It only reads the URL to detect which coin you are viewing.
+Only aggregates leave the pipeline. Account names, account ids, post ids and post text
+are refused when the data is stored and never reach the extension. Everything in this
+document describes counts and proportions computed over public posts.
 
----
-
-## Engagement Coefficient (EC)
-
-The core metric behind the chatter level indicator. EC measures how much attention a
-coin is receiving on X, weighted by the reach of the accounts posting about it.
-
-```
-EC = (total_likes + total_retweets) x log(1 + follower_reach) / posts_total
-```
-
-- **total_likes** and **total_retweets**: sum of all likes and retweets across posts
-  in the current cycle
-- **follower_reach**: sum of follower counts of all authors who posted
-- **posts_total**: number of posts collected in the cycle
-- The logarithm prevents a single whale account from dominating the score
-- Dividing by post count normalizes for volume - a coin with 5 high-engagement posts
-  scores higher than one with 50 low-engagement posts
-
-EC is displayed on a logarithmic scale in the sparkline chart. Values typically range
-from 0 (no activity) to 20,000+ (major events).
+The extension does not read the pages you visit. It reads the address of the tab you
+are on to work out which coin you are looking at, and nothing else.
 
 ---
 
-## Chatter level
+## The two windows
 
-Each coin's current EC is compared to its own 30-day rolling mean. The ratio determines
-the label:
+Every card is split into two parts, and the split is deliberate.
 
-| EC / 30-day mean | Label |
-|---|---|
-| Below 0.5x | **Quiet** - unusually low activity |
-| 0.5x to 2x | **Active** - normal range |
-| 2x to 6x | **Buzzing** - elevated discussion |
-| Above 6x | **Spiking** - unusual surge in attention |
+**Latest update** is the most recent completed collection pass. It carries the time it
+was collected, which is usually some tens of minutes ago.
 
-The baseline is recomputed every cycle, so it adapts to each coin's typical activity
-level. A coin that is always busy has a higher baseline, and only unusually high
-activity triggers Buzzing or Spiking.
+**Last 24 hours** is everything below the divider. A single update is often only a
+handful of posts, which is too few to read a mood from. A day is enough to be
+meaningful.
+
+The two never mix. Where a number covers 24 hours, it is measured over a rolling 24
+hours ending at the latest update, not over a calendar day.
 
 ---
 
-## Tone analysis
+## Posting attention
 
-Posts are classified by an NLP pipeline into positive, negative, or neutral sentiment.
-The extension shows a tone shift relative to each coin's own baseline.
+The headline reading. It counts how many distinct accounts posted about a coin in the
+latest update, and compares that with the same coin's own recent normal.
 
-### How tone shift works
+The comparison is against the median of up to 20 earlier update windows in which the
+coin had any activity at all, and needs at least 5 of them before it will say anything.
+Silent windows are excluded from that median: a coin that is usually silent would
+otherwise have a normal of zero, and any single post would read as an infinite jump.
 
-1. For each cycle, compute the raw net sentiment: `pos_ratio - neg_ratio`
-2. Compute a baseline from the coin's last 30 days of qualifying cycles
-   (minimum 30 samples required)
-3. Shift = `(raw_net - baseline) x 100`, clamped to the range -100 to +100
-
-The shift tells you whether the crowd is more positive or negative than usual for
-this specific coin - not in absolute terms, but relative to its own history.
-
-### Tone labels
-
-| Shift value | Label |
+| reading | meaning |
 |---|---|
-| Above +16 | Bullish |
-| +8 to +16 | Positive |
-| -8 to +8 | Neutral |
-| -16 to -8 | Negative |
-| Below -16 | Bearish |
+| **Unusual** | 6x its usual number of posting accounts or more |
+| **Busy** | 1.5x to 6x |
+| **Steady** | 0.5x to 1.5x |
+| **Quiet** | below 0.5x |
 
-### Quality gate
+If nobody posted in the latest update, the row says "no posts" rather than showing a
+multiple. An absence is not a measurement.
 
-Tone is only shown when all of the following pass:
-
-- At least 5 posts collected in the cycle
-- NLP confidence score above the minimum threshold
-- Underlying X data flagged as healthy
-- Data is from the latest cycle (stale tone labels are never shown)
-
-When the quality gate fails, the card shows "Insufficient data" instead of a
-potentially misleading label.
-
-If fewer than 30 qualifying samples exist in the 30-day window (new coin or sparse
-data), the raw net sentiment is shown as a fallback instead of the shift.
+The percentage in the tooltip is the share of tracked coins this one is busier than in
+the same update. It is never 100%, because a coin cannot be busier than itself.
 
 ---
 
-## Derivatives indicators
+## Tone
 
-Derivatives data comes from exchange futures markets. Three indicators are shown when
-data is available:
+The proportion of posts scored positive, neutral and negative over the last 24 hours,
+shown as three percentages that sum to 100.
 
-### Funding rate
+Tone needs at least 5 scored posts in the window. Below that the row says so rather
+than reporting a figure, because two or three posts cannot describe a mood.
 
-The perpetual futures funding rate shows which side of the market is paying the other.
+Tone describes what posts say. It is not a view on price, and no label in the extension
+is phrased as one.
 
-| Condition | Label |
+### How clear-cut
+
+A separate reading of whether the scoring agreed with itself:
+
+| shown | meaning |
 |---|---|
-| Funding rate > 0 | **Longs paying** - long positions pay short positions |
-| Funding rate < 0 | **Shorts paying** - short positions pay long positions |
-| Funding rate = 0 | **Neutral** |
+| **clear** | most posts leaned the same way |
+| **mixed** | opinion was divided, with strong views either side and little in between |
+| **unclear** | the scoring pulled in different directions, so treat the tone above as rough |
 
-The rate is shown as a percentage per 8-hour funding cycle (e.g., "0.012% / 8h").
-
-### Open interest flow
-
-The percentage change in total open interest over the recent period.
-
-| Change | Label |
-|---|---|
-| Above +0.5% | **OI rising** - new positions being opened |
-| Below -0.5% | **OI falling** - positions being closed |
-| Within +/- 0.5% | **OI stable** |
-
-The absolute OI value in USD is also shown (e.g., "$1.2B").
-
-### Whale positioning
-
-The long/short ratio of top trader accounts, compared to the market-wide distribution.
-
-| Condition | Label |
-|---|---|
-| Ratio above 75th percentile (market-wide) | **Whales leaning long** |
-| Ratio below 25th percentile (market-wide) | **Whales leaning short** |
-| Between 25th and 75th percentile | **Neutral** |
-
-The 25th and 75th percentile thresholds are computed fresh each cycle across all coins
-with valid futures data, so the labels reflect relative positioning within the current
-market - not fixed thresholds.
-
-### Derivatives quality gate
-
-All futures rows are hidden (not shown at all) when any of these conditions are true:
-
-- No futures contract exists for the coin
-- Exchange data flagged as unhealthy
-- Data flagged as stale
-- Data is older than 1 hour
-
-This prevents showing outdated or unreliable positioning data.
+This shares tone's 5-post threshold but is measured independently, so it can be
+available when tone is not.
 
 ---
 
-## 24-hour volume
+## Discussed
 
-Trading volume is ranked against the coin's own 30-day history using percentiles.
+Topics raised in the last 24 hours, matched against a curated crypto vocabulary:
+hype, fear, scam talk, memes, positive language, negative language.
 
-| Percentile | Label |
-|---|---|
-| Above 75th | **Elevated** |
-| 50th to 75th | **Above avg** |
-| 25th to 50th | **Below avg** |
-| Below 25th | **Low** |
+The count beside each topic is **vocabulary matches, not posts**. One post can use
+several words from the same topic, so the matches can exceed the post count.
 
-This tells you whether today's volume is high or low for this specific coin, not
-compared to other coins.
+Hovering a topic shows example words behind it. These are examples rather than a
+ranking: words that repeat the same idea in different phrasings are collapsed, so five
+slots carry five distinct words. Where a coin genuinely has fewer than five, it shows
+what it has.
+
+Topics are shown separately from tone and are not an explanation of it. They come from
+different methods, and a broadly positive conversation can still discuss risks.
 
 ---
 
-## Sparkline chart
+## Who's posting
 
-The engagement chart shows EC values over time with tone coloring on each bar.
+Distinct accounts that posted in the last 24 hours.
 
-### Timeframe modes
+The verified figure is a lower bound, written as "60+ verified". Verified accounts
+cannot be de-duplicated across update windows, so the number shown is the count from
+the busiest single update and the true figure over the day may be higher.
 
-| Mode | Window | Granularity |
-|---|---|---|
-| **C** (Cycle) | Last 7 days | One bar per data cycle (every 2-4 hours) |
-| **D** (Day) | Last 30 days | One bar per calendar day (average EC for the day) |
-| **W** (Week) | Last 4 weeks | One bar per 7-day window (average EC for the week) |
+---
+
+## Posts
+
+Posts in the last 24 hours, next to what is normal for that coin.
+
+Normal is the median of up to 14 earlier complete days. Only days collected under the
+current matching rules are used. When a change to how posts are matched to coins makes
+older days incomparable, they are dropped rather than averaged in, and the comparison
+is withheld entirely until enough comparable days exist.
+
+---
+
+## Price and volume
+
+Traded value over 24 hours, the change against 24 hours ago, and the high-to-low swing
+in that period. All three come from Binance.
+
+Change and swing answer different questions and neither can be derived from the other:
+a coin can finish level after a 12% swing. Only the change carries a direction, so only
+it is coloured.
+
+These are market facts shown for context. Nothing links them to the social readings
+above.
+
+---
+
+## Activity chart
+
+Bars show how many distinct accounts posted, on the same measure as the attention
+reading, so the chart and the headline cannot disagree.
+
+### Timeframes
+
+The three buttons switch between one bar per update window, per day and per week. The
+first is labelled with the observed interval between updates, which drifts, so it is
+measured over the last 24 hours rather than assumed.
 
 ### Bar heights
 
-EC values are displayed on a logarithmic scale (`log(1 + EC)`), normalized so the
-tallest bar fills the chart. The log scale prevents extreme spikes from flattening all
-other bars.
+For day and week bars, height is the average over the update windows in which the coin
+was actually being discussed, not over every window in the period. Averaging across
+silent stretches would blend how busy a coin was with how often it was discussed into
+one number a reader cannot separate. How often it was discussed is shown by how many
+bars there are.
 
-### Bar colors
+### Bar colours
 
-Each bar is colored by the tone shift for that time period:
+Green, grey and red reflect the tone of posts in that period, on the same scale as the
+tone row.
 
-| Tone shift | Color |
-|---|---|
-| Above +8 (more positive than usual) | Green |
-| Below -8 (more negative than usual) | Red |
-| Between -8 and +8, or no data | Gray |
+### Missing history
+
+Where a change in how posts were matched means older bars counted a different
+population, those bars are not drawn. The chart starts from the point the measurement
+became comparable and rebuilds day by day. This affects a small number of coins whose
+name is an ordinary English word.
 
 ---
 
 ## Feed health
 
-If no new data has arrived for 6+ hours, the extension shows an amber badge and a
-"Data temporarily unavailable" notice. This indicates a pipeline interruption, not a
-problem with any specific coin.
+If no coin has had new data for six hours or more, the extension shows an amber badge
+and a notice. That indicates an interruption in collection, not a problem with any
+particular coin.
+
+---
+
+## Limits
+
+Worth knowing before reading anything into a card:
+
+- English-language posts on X only. Conversation elsewhere is invisible here.
+- Filtering of automated and promotional posts is imperfect.
+- Quiet coins genuinely have little to report, and the extension says so rather than
+  filling the space.
+- A coin whose name is an ordinary word is harder to measure, because posts using that
+  word are not necessarily about the coin.
 
 ---
 
 ## What this is not
 
-Instrumetriq shows what the crowd on X is saying about crypto coins. It does not:
+Instrumetriq describes what people are saying about crypto coins on one social network.
+It does not:
 
-- Generate trading signals, buy/sell indicators, or price predictions
+- Generate trading signals, buy or sell indicators, or price predictions
 - Forecast price movements or market direction
 - Provide financial advice of any kind
 
-The data may be delayed by 2-4 hours. Social chatter and derivatives positioning are
-context for your own research - nothing more.
+Social conversation is context for your own research, and nothing more.

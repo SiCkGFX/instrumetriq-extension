@@ -1,7 +1,7 @@
 // ── sparkline-core.js ──────────────────────────────────────────────────────
 // CANONICAL sparkline logic shared by the extension (popup.js) and the pulse
 // website (pulse/index.astro). This file lives in the PUBLIC instrumetriq-
-// extension repo and is vendored (read-only copy) into the private site — edit
+// extension repo and is vendored (read-only copy) into the private site, edit
 // it HERE, never in the copy. Pure logic only: no DOM, no CSS, no network, no
 // entitlement/paywall code. Each surface keeps its own HTML/CSS "paint".
 //
@@ -131,9 +131,16 @@ var SparklineCore = (function () {
         for (var w = 0; w < weekEdges.length; w++) { if (dMs >= weekEdges[w].start && dMs <= weekEdges[w].end) { key = weekEdges[w].key; break; } }
         if (!key) continue;
       }
-      if (!buckets[key]) buckets[key] = { sum: 0, count: 0, toneSum: 0, toneCount: 0, ts: ts[j], posSum: 0, negSum: 0, rc: 0 };
+      if (!buckets[key]) buckets[key] = { sum: 0, count: 0, actCount: 0, toneSum: 0, toneCount: 0, ts: ts[j], posSum: 0, negSum: 0, rc: 0 };
       var b = buckets[key];
-      b.sum += (sl[j] != null && sl[j] > 0) ? sl[j] : 0;
+      // `actCount` counts only the cycles that actually carried activity. The bar
+      // height is a mean over THOSE cycles, matching how tone/pos/neg are already
+      // averaged. Dividing by `count` (every cycle in the bucket, silent ones
+      // included) blends intensity with frequency into one number the reader
+      // cannot decompose, and crushes sparse coins: measured p90 6.25x, max 29x
+      // understatement, 97 of 278 coins understated more than 2x.
+      // `count` is retained - it is the bucket's cycle total and is still useful.
+      if (sl[j] != null && sl[j] > 0) { b.sum += sl[j]; b.actCount++; }
       b.count++;
       if (tone && tone[j] != null) { b.toneSum += tone[j]; b.toneCount++; }
       b.ts = ts[j];
@@ -143,7 +150,7 @@ var SparklineCore = (function () {
     var keys = Object.keys(buckets).sort();
     if (keys.length === 0) return { vals: [], tones: [], stamps: [], keys: [], pos: [], neg: [], firstTs: '', lastTs: '' };
     return {
-      vals:   keys.map(function (k) { return buckets[k].sum / buckets[k].count; }),
+      vals:   keys.map(function (k) { return buckets[k].actCount ? buckets[k].sum / buckets[k].actCount : 0; }),
       tones:  keys.map(function (k) { return buckets[k].toneCount > 0 ? Math.round(buckets[k].toneSum / buckets[k].toneCount) : null; }),
       stamps: keys.map(function (k) { return buckets[k].ts; }),
       keys:   keys,

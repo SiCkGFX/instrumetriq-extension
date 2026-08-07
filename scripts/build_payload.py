@@ -213,7 +213,7 @@ def compute_tone_arrays(rows: list[dict]) -> tuple[list, float | None]:
 def futures_gate(row: dict) -> tuple[bool, str]:
     # Gate on data presence only. datasweep dropped the `futures_stale` flag and
     # `futures_age_sec` (2026-07-11): both encoded queue position in the ~37-min
-    # collection cycle, not data age — live REST futures data is always current.
+    # collection cycle, not data age, live REST futures data is always current.
     # "Fetch succeeded" is already captured by futures_data_ok.
     if not row.get("futures_contract_exists"):
         return False, "no_contract"
@@ -310,7 +310,7 @@ def write_marker(path: Path, content: str) -> None:
 def sparkline_keep_indices(ts_list: list[str], full_days: int = SPARKLINE_FULL_DAYS) -> list[int]:
     """Indices to keep for a size-bounded sparkline.
 
-    Every point within the last `full_days` (full ~38-min resolution — feeds the
+    Every point within the last `full_days` (full ~38-min resolution, feeds the
     cycle view's 2h merge + live head), plus the last point of each older calendar
     day (enough for the day/week views, which bucket by day/week anyway). Bounds
     the payload so it fits chrome.storage.local. `ts_list` is chronological.
@@ -572,7 +572,7 @@ def build_payload(output_path: Path) -> None:
         else:
             entry["volume"] = {"ok": False}
 
-        # ---- Sparklines (downsampled to bound payload size — see helper) ----
+        # ---- Sparklines (downsampled to bound payload size, see helper) ----
         keep = sparkline_keep_indices([r["ts"] for r in rows])
         entry["sparkline"] = [round(ec_vals[i], 4) if ec_vals[i] is not None else None
                               for i in keep]

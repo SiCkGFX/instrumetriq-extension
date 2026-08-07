@@ -460,6 +460,10 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  /* NO SCROLLBAR, by requirement: the whole card must be visible at once. This
+     is only safe because the 2026-08-03 spacing pass left ~20px of headroom
+     (modelled in DEVLOG 5j). Anything that adds a row or grows a font has to be
+     paid for by trimming here, not by re-enabling scroll. */
   overflow: hidden;
   min-height: 0;
 }
@@ -479,16 +483,22 @@ body {
 
 .card {
   background: var(--bg-card);
-  padding: 12px;
-  flex: 1;
+  padding: 10px 12px;
   box-sizing: border-box;
   border-left: 3px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Grow to fill a short card so the accent rail meets the status bar, but never
+     shrink: .card-area does the scrolling. */
+  flex: 1 0 auto;
 }
 
 /* Left border color reflects activity state */
+/* v2 activity bands. The v1 names (buzzing/spiking/active) are kept below so a
+   cached v1 render cannot lose its colour mid-upgrade. */
+.card.state-busy    { border-left-color: var(--accent-cyan); }
+.card.state-unusual { border-left-color: var(--accent-amber); }
+.card.state-steady  { border-left-color: var(--text-muted); }
 .card.state-buzzing { border-left-color: var(--accent-cyan); }
 .card.state-spiking { border-left-color: var(--accent-amber); }
 .card.state-active  { border-left-color: var(--text-muted); }
@@ -500,7 +510,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .scale-step {
@@ -515,6 +525,9 @@ body {
 }
 
 /* Highlight current step by state */
+.card.state-busy    .scale-step.current { color: var(--accent-cyan); }
+.card.state-unusual .scale-step.current { color: var(--accent-amber); }
+.card.state-steady  .scale-step.current { color: var(--text-secondary); }
 .card.state-buzzing .scale-step.current { color: var(--accent-cyan); }
 .card.state-spiking .scale-step.current { color: var(--accent-amber); }
 .card.state-active  .scale-step.current { color: var(--text-secondary); }
@@ -530,7 +543,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .coin-symbol {
@@ -555,7 +568,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .sparkline-label {
@@ -638,7 +651,7 @@ body {
   justify-content: space-between;
   align-items: flex-end;
   flex-shrink: 0;
-  padding-bottom: 14px; /* align with bars height, above x-labels */
+  padding-bottom: 13px; /* align with bars height, above x-labels */
 }
 
 .y-label {
@@ -665,7 +678,7 @@ body {
   display: flex;
   align-items: flex-end;
   gap: 1px;
-  height: 56px;
+  height: 52px;
   position: relative;
   overflow: hidden;
 }
@@ -699,8 +712,11 @@ body {
 .x-axis {
   display: flex;
   justify-content: space-between;
-  margin-top: 2px;
-  margin-bottom: 4px;
+  margin-top: 1px;
+  /* Gap between the axis labels and the first data row is the sum of three
+     rules: this 1px, .data-rows padding-top 0, and .row-live padding-top 3px.
+     11px -> 8px -> 4px across three passes. Change them together or it drifts. */
+  margin-bottom: 1px;
 }
 
 .x-label {
@@ -715,22 +731,30 @@ body {
 
 /* ── Data rows ───────────────────────────────────────────────────────── */
 
+/* No border-top: the "Last 24 hours" divider a few rows down already separates
+   the live reading from the aggregate, and a second rule directly under the
+   chart just spent vertical space the footer needed. */
 .data-rows {
-  flex: 1;
+  /* Natural height, never squeezed. The earlier `flex: 1 1 auto` + `min-height: 0`
+     let this shrink below its content, and with no `overflow` set the surplus rows
+     painted OUTSIDE the box and over the sibling X link, which is why "See what's
+     being said" appeared between Volume and Price. That pair existed to stop the
+     in-card disclaimer row being pushed out; that row now lives in .status-bar, so
+     the constraint is obsolete as well as harmful. */
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 4px;
-  margin-top: 2px;
-  margin-bottom: 2px;
+  padding-top: 0;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .data-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 3px 0;
+  padding: 2px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -751,6 +775,12 @@ body {
 .row-value.tone-positive { color: var(--tone-positive); }
 .row-value.tone-negative { color: var(--tone-negative); }
 .row-value.na { color: var(--text-muted); }
+.row-value.attn-none { color: var(--text-muted); }
+
+/* Price direction. Reuses the tone tokens so light/dark and the contrast tuning
+   already done for those apply unchanged. */
+.px-up   { color: var(--tone-positive); }
+.px-down { color: var(--tone-negative); }
 
 /* Tone colors usable anywhere (overlay text, etc.) */
 strong.tone-positive { color: var(--tone-positive); }
@@ -819,6 +849,29 @@ strong.tone-mixed    { color: var(--text-secondary); }
 .row-value span[data-tooltip]::after {
   right: 0;
   left: auto;
+}
+
+/* Chart header controls sit hard against the right edge of a 400px popup, so a
+   220px tooltip anchored left runs off screen. Anchor right and drop downward:
+   upward would be clipped by .card-area's overflow:hidden. */
+.tf-btn[data-tooltip]::after,
+.sparkline-legend[data-tooltip]::after {
+  left: auto;
+  right: 0;
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+
+/* Nothing may render wider than the popup. Belt and braces for any tooltip added
+   later without its own anchor rule: 400px popup, 12px card padding each side. */
+[data-tooltip]::after {
+  max-width: calc(400px - 24px);
+}
+
+/* Sits at the card's right edge, so its tooltip must open leftward. */
+.updated-ago[data-tooltip]::after {
+  left: auto;
+  right: 0;
 }
 
 /* Spark bar CSS tooltips disabled - JS tooltip used instead (overflow:hidden clips ::after) */
@@ -918,8 +971,9 @@ strong.tone-mixed    { color: var(--text-secondary); }
 .card-footer-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-top: 4px;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
   flex-shrink: 0;
 }
 
@@ -937,13 +991,55 @@ strong.tone-mixed    { color: var(--text-secondary); }
   margin-left: auto;
 }
 
-.card-disclaimer {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  padding-bottom: 2px;
+/* ── Status bar ──────────────────────────────────────────────────────
+   A fixed strip between the card area and the footer. Body background so it
+   reads as part of the page rather than as another footer band. flex-shrink:0
+   keeps it from ever being squeezed, and being a sibling of .card-area means
+   card height changes cannot move it. */
+.status-bar {
   flex-shrink: 0;
+  /* Card background, NOT --bg-base. --bg-base (#141414) is darker than both the
+     card (#1E1E1E) and the footer (#1A1A1A), so it rendered as a black band
+     wedged between them. Matching the card makes the strip read as the bottom of
+     the card that happens to hold still. */
+  background: var(--bg-card);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  /* Same 3px border + 12px padding as .card, so content lands on the identical
+     15px offset and the disclaimer lines up with the rows above it. Border and
+     padding both add to the offset, so these have to match the card's pair
+     exactly rather than being summed into one padding value. */
+  padding: 4px 12px 5px;
+  border-left: 3px solid var(--border-subtle);
 }
+
+/* The accent rail continues from the card into the bar, so the coloured edge has
+   no 3px notch where the card stops. Mirrors the .card state colours. */
+.status-bar.state-busy    { border-left-color: var(--accent-cyan); }
+.status-bar.state-unusual { border-left-color: var(--accent-amber); }
+.status-bar.state-steady  { border-left-color: var(--text-muted); }
+.status-bar.state-quiet   { border-left-color: var(--border-subtle); }
+
+.status-disclaimer {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The bar is the last thing above the footer, so its tooltip must open upward
+   and leftward to stay inside the popup. */
+.status-bar .updated-ago[data-tooltip]::after {
+  bottom: calc(100% + 6px);
+  top: auto;
+  left: auto;
+  right: 0;
+}
+
+/* The X link, when a coin is spiking, gets its own line beneath. */
+.card-footer-link { justify-content: flex-start; margin-top: 1px; }
 
 /* ── AI narrative ────────────────────────────────────────────────────── */
 
@@ -977,7 +1073,11 @@ strong.tone-mixed    { color: var(--text-secondary); }
   flex-shrink: 0;
   background: var(--bg-header);
   border-top: 1px solid var(--border-subtle);
-  padding: 5px 16px 4px 19px;
+  /* 15px left / 12px right matches the card and the status bar, whose text sits
+     at 3px accent border + 12px padding. Was 19/16, which read as indented
+     against every other region. Horizontal only, so the card height budget in
+     DEVLOG 5j is unaffected. */
+  padding: 5px 12px 4px 15px;
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -1160,7 +1260,7 @@ strong.tone-mixed    { color: var(--text-secondary); }
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 56px;
+  height: 52px;
 }
 .sparkline-no-data {
   font-size: 11px;
@@ -1657,3 +1757,177 @@ strong.tone-mixed    { color: var(--text-secondary); }
   color: var(--text-secondary);
   text-decoration: underline;
 }
+
+/* ── Universe strip (v2) ─────────────────────────────────────────────
+   Sits between the header and the coin nav. Uses the existing token set -
+   an earlier version referenced a non-existent `--accent` and fell through
+   to hardcoded cyan everywhere, which also broke light theme. */
+.zone-universe {
+  flex-shrink: 0;
+  /* 15px left to match the card text, which starts after a 3px accent border. */
+  padding: 4px 12px 5px 15px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.zone-universe:empty { display: none; }
+
+.uni-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 1px;
+}
+.uni-row:last-child { margin-bottom: 0; }
+
+.uni-label {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+.uni-value {
+  flex: 1 1 auto;
+  text-align: right;
+  color: var(--text-primary);
+}
+
+.uni-chips {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+/* Plain text links, matching the card's row values. The previous version
+   boxed these in cyan, which competed with the coin card for attention. */
+.uni-chip {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+/* Hover feedback ONLY where the chip actually does something. The static spans
+   are plain text and must not react at all. `.static:hover { color: inherit }`
+   did not achieve that: `inherit` takes the PARENT's colour, so an amber spike
+   chip still visibly changed on hover. Scoping to `button` means static chips
+   never get a hover declaration to undo. */
+button.uni-chip:hover { color: var(--accent-cyan); }
+.uni-chip.static { cursor: default; }
+
+/* Same four colours the card's scale strip uses (see .card.state-* .scale-step),
+   so a chip up here and the coin's own strip below can never disagree. Before
+   this only spikes were coloured and everything else rendered plain white, which
+   threw away the one thing the strip is for: reading the state at a glance. */
+.uni-chip.state-unusual { color: var(--accent-amber); }
+.uni-chip.state-busy    { color: var(--accent-cyan); }
+.uni-chip.state-steady  { color: var(--text-secondary); }
+.uni-chip.state-quiet   { color: var(--text-muted); }
+
+.uni-stats { gap: 8px; color: var(--text-muted); font-size: 10px; line-height: 1.2; }
+.uni-stat  { flex: 0 0 auto; }
+.uni-hot   { color: var(--accent-amber); }
+
+/* Tooltips inside the strip must drop DOWNWARD - the strip is near the top of
+   the popup, so the default upward tooltip is clipped by the window. */
+.zone-universe [data-tooltip]::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+/* Right-hand items would overflow the 400px popup, so anchor them to the right. */
+.zone-universe .uni-value[data-tooltip]::after,
+.zone-universe .uni-chip[data-tooltip]::after {
+  left: auto;
+  right: 0;
+}
+
+/* ── Card additions (v2) ─────────────────────────────────────────────
+   `.level-badge` is coloured TEXT in this design, never a filled pill.
+   Amber matches what "Spiking" used in v1 - the rare, attention-worthy state. */
+.level-badge.spike { color: var(--accent-amber); }
+
+.coin-row-badge.spike {
+  background: var(--badge-amber-bg);
+  color: var(--accent-amber);
+}
+
+/* One colour per activity band, identical to .card.state-* .scale-step.current
+   so the number and the highlighted word in the strip always agree. Replaces
+   attn-spike/attn-mid, which keyed on spike_state and left everything between
+   normal and spike rendering plain white. */
+.row-value.attn-unusual { color: var(--accent-amber); }
+.row-value.attn-busy    { color: var(--accent-cyan); }
+.row-value.attn-steady  { color: var(--text-secondary); }
+.row-value.attn-quiet   { color: var(--text-muted); }
+.row-value.muted      { color: var(--text-muted); }
+.row-value.tone-neutral { color: var(--tone-mixed); }
+
+/* Topics: each tag is its own hover target carrying that category's word list.
+   Inlining the words made the row wrap and skew. */
+.topics-row .row-value { text-align: right; }
+.topics-value { line-height: 1.5; }
+.topic-tag { cursor: default; }
+.topic-tag:hover { color: var(--accent-cyan); }
+.topic-sep { color: var(--text-muted); }
+/* Anchor right so a 220px tooltip on the rightmost tag stays inside 400px. */
+.topics-value .topic-tag[data-tooltip]::after { left: auto; right: 0; }
+
+/* Sparkline controls sit directly under the universe strip, so their tooltips
+   must also drop downward rather than up into it. */
+.sparkline-header [data-tooltip]::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.sparkline-tf[data-tooltip]::after { left: 0; right: auto; }
+
+/* ── Live row + 24h divider ──────────────────────────────────────────
+   The card has two speeds. Repeating "· 24h" on four rows read as
+   "everything is stale"; one divider says it once and lets the live
+   reading sit above as the headline. */
+.data-row.row-live {
+  padding: 3px 0 4px;
+  align-items: baseline;
+  /* The .rows-divider directly below already draws the separator, so the row's
+     own bottom border made two lines a few pixels apart. */
+  border-bottom: none;
+}
+.data-row.row-live .row-label { color: var(--text-primary); }
+.data-row.row-live .row-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+.row-age {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.rows-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 1px;
+}
+/* Rule on BOTH sides so the label sits centred. With only ::after the label was
+   pinned left, stacking against the already-busy left column of row labels. */
+.rows-divider::before,
+.rows-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.rows-divider span {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Wider timeframe pills now that they carry words. */
+.tf-btn { padding: 2px 7px; letter-spacing: 0.01em; }
+.sparkline-legend { gap: 3px; }

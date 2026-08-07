@@ -1,11 +1,11 @@
 <img src="extension/icons/instrumetriq-logo.svg" alt="Instrumetriq" width="480">
 
-**X (Twitter) chatter indicators for crypto, right in your browser.**
+**What people on X (Twitter) are actually saying about crypto, right in your browser.**
 
-Instrumetriq is a Chrome and Firefox extension that shows you what the crowd is saying
-about coins listed on Binance futures - chatter levels, tone shifts, derivatives
-positioning, and volume. Open any supported exchange or coin page, click the icon, and
-see the full picture without leaving your tab.
+Instrumetriq is a Chrome and Firefox extension that describes the conversation around
+270+ coins: how many accounts are posting, in what proportion of positive to negative,
+about what, and how that compares with each coin's own normal. Open any supported
+exchange or coin page, click the icon, and read it without leaving your tab.
 
 This is a passive awareness tool. It does not generate trading signals, price
 predictions, or financial advice of any kind.
@@ -14,103 +14,76 @@ predictions, or financial advice of any kind.
 
 ## Features
 
-### Chatter level
+### Posting attention
 
-Every coin is rated against its own 30-day baseline engagement on X:
+How many distinct accounts posted about a coin in the latest update, against that
+coin's own recent normal. Four bands, colour-coded throughout the card:
 
-- **Quiet** - unusually low discussion
-- **Active** - normal range
-- **Buzzing** - elevated chatter
-- **Spiking** - unusual surge in attention
+- **Quiet** - below half its usual
+- **Steady** - around its usual
+- **Busy** - 1.5x or more
+- **Unusual** - 6x or more
 
-The underlying metric (Engagement Coefficient) accounts for likes, retweets, poster
-reach, and post count. A visual scale strip on each card shows where the coin falls.
+When nobody posted in the latest update, it says "no posts" rather than showing a
+multiple.
 
-### Tone shift
+### Tone
 
-NLP analysis classifies posts as positive, negative, or neutral and computes a shift
-relative to the coin's own historical baseline:
+The split of positive, neutral and negative language across the last 24 hours, with a
+separate reading of whether the scoring agreed with itself. Descriptive only: it says
+what posts said, never what a price will do.
 
-- **Turning positive / Leaning positive / Steady / Leaning negative / Turning negative**
-- Shift magnitude shown (e.g., "+28 shift")
-- Quality-gated: hidden when data is insufficient or stale, so you never see a
-  misleading label
+### Discussed
 
-### AI narrative
+The topics people actually raised - hype, fear, scam talk, memes, positive and negative
+language - with example words behind each on hover.
 
-A 1-2 sentence plain-language summary is generated per coin on demand when you open
-a card. Powered by OpenAI via the instrumetriq.com API. Only data sections that are
-current and valid are included in the request - stale or unavailable sections are
-omitted - so the summary never describes data the card itself is hiding. Results are
-cached server-side and locally for the duration of the current data cycle, so repeat
-opens are instant without additional network calls.
+### Who's posting
 
-### Derivatives dashboard
+Distinct accounts over the last 24 hours, and at least how many of them were verified.
 
-For coins with perpetual futures contracts:
+### Posts, volume and price
 
-- **Funding rate** - are longs or shorts paying? Shown as a percentage per 8-hour cycle
-- **Open interest flow** - is OI rising, falling, or stable? Absolute OI in USD included
-- **Whale positioning** - top-account long/short ratio vs. the market-wide distribution
+Posts in the last 24 hours against what is normal for that coin, plus 24h traded
+value, price change and high-to-low swing from Binance.
 
-All derivatives rows are hidden entirely when the underlying data is stale or
-unavailable - no partial or outdated displays.
+### Market panel
 
-### 24-hour volume
+The whole universe at a glance before you pick a coin: whether the conversation is more
+or less positive than usual, which coins are busiest right now, and how many are seeing
+unusual activity.
 
-Current trading volume ranked against the coin's own 30-day history:
-Elevated / Above avg / Below avg / Low.
+### Activity chart
 
-### Engagement chart
+Distinct accounts posting, per update window, per day or per week. Bar colour reflects
+the tone of posts in that period.
 
-Interactive sparkline showing engagement history with tone-colored bars:
+### Every row explains itself
 
-- **Cycle mode (C)** - per-cycle bars over the last 7 days
-- **Day mode (D)** - daily averages over the last 30 days
-- **Week mode (W)** - weekly averages over the last 4 weeks
-
-Bar heights use a log scale so spikes don't flatten everything else. Green bars = more
-positive than usual, red = more negative, gray = neutral or no tone data.
+Any reading that cannot be filled stays in place and says why, rather than leaving a
+gap: too few posts, nothing recognised, nobody posting, or not enough comparable
+history yet.
 
 ### Auto-detection
 
-The extension detects which coin you are viewing from the page URL (never reads page
-content). Supported on 22 sites:
-
-**Exchanges:** Binance, Bybit, OKX, Coinbase, TradingView, Kraken, Bitget, KuCoin,
-Gate.io, MEXC, HTX, Crypto.com, Phemex, BingX, Bitfinex, dYdX
-
-**Info/analytics:** CoinGecko, CoinMarketCap, CoinDesk, CryptoCompare, Messari,
-DeFiLlama
-
-When you open the popup on a supported page, the detected coin appears as a suggestion
-card if it is not already in your tracked list.
+Opens to the coin you are already looking at on a supported exchange or info site.
 
 ### Coin picker
 
-Search the full 257-coin universe by symbol. Sort alphabetically or by current
-activity level (Spiking first, then Buzzing, etc.). Free users pick 2; Pro users
-track as many as they want.
+Search and sort the full universe. Free tier tracks 2 coins; Pro tracks all of them.
 
 ### Badge indicator
 
-The extension icon shows a color-coded badge:
-
-- **Cyan** - one or more coins are Buzzing or Spiking
-- **Gray** - all coins are Quiet or Active
-- **Amber** - data feed interrupted (no update in 6+ hours)
-
-Badge scope is configurable: "My coins" (only your tracked coins) or "All coins"
-(entire universe).
+Colour-coded icon reflecting activity across your tracked coins, or the whole universe.
 
 ### Notifications
 
-One aggregated notification per update cycle when any tracked coin crosses into
-Buzzing or Spiking. Never per-coin spam. Suppressible with one click.
+Optional desktop alerts when a tracked coin reaches unusual attention. Permission is
+requested only if you switch them on.
 
 ### Theme support
 
-Light, Dark, or Auto (follows your system preference).
+Light, dark, or follow the system.
 
 ---
 
@@ -118,7 +91,7 @@ Light, Dark, or Auto (follows your system preference).
 
 **Free** - 2 tracked coins, all features included, no time limit.
 
-**Pro** - all 257 coins. Monthly ($5/mo) or yearly ($45/yr, save 25%). Payment
+**Pro** - all 270+ coins. Monthly ($5/mo) or yearly ($45/yr, save 25%). Payment
 handled by Stripe via ExtensionPay. No account creation needed - just an email for
 the receipt.
 
@@ -147,9 +120,9 @@ paywalled.
 
 ## How it works
 
-See [METHODOLOGY.md](METHODOLOGY.md) for the full breakdown of how every indicator is
-computed, including the Engagement Coefficient formula, chatter level thresholds, tone
-shift calculation, derivatives quality gates, and volume percentile ranking.
+See [METHODOLOGY.md](METHODOLOGY.md) for how every reading is computed: the attention
+bands and the baseline behind them, the tone and agreement thresholds, how topic
+matches are counted, and how the chart is built.
 
 ---
 
@@ -158,7 +131,9 @@ shift calculation, derivatives quality gates, and volume percentile ranking.
 ```
 extension/           Extension source (popup, background worker, content script)
 scripts/
-  build_payload.py   Computes all metrics from per-coin CSVs, writes the JSON payload
+  metrics_v2.py      Pure metric functions, unit-tested in isolation
+  build_payload_v2.py  Computes every reading from per-coin CSVs, writes the JSON payload
+  test_metrics_v2.py Unit tests for the metric layer
   build_zip.py       Builds distributable .zip files for Chrome and Firefox
 nginx/               Server config template
 METHODOLOGY.md       Full methodology documentation

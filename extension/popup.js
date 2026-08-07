@@ -18,8 +18,6 @@ let pickerSort          = 'alpha';
 
 // ── Narrative cache ───────────────────────────────────────────────────
 // Key: coin symbol. Cleared whenever pushed_at advances (new feed cycle).
-const narrativeCache = {};
-let narrativePushedAt = null;
 
 // ── DOM references ────────────────────────────────────────────────────
 let cardAreaEl, prevBtn, nextBtn, counterEl, coinNameEl, editBtn;
@@ -43,8 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Single batched storage read
   const stored = await chrome.storage.local.get([
     'trackedCoins', 'isPro', 'lastPayload', 'badgeMode',
-    'notificationsEnabled', 'pickerSetupDone', 'theme',
-    'narrativeTexts', 'narrativePushedAt'
+    'notificationsEnabled', 'pickerSetupDone', 'theme'
   ]);
 
   trackedCoins         = stored.trackedCoins         ?? [];
@@ -54,12 +51,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   notificationsEnabled = stored.notificationsEnabled ?? false;
   pickerSetupDone      = stored.pickerSetupDone      ?? false;
   theme                = stored.theme                ?? 'auto';
-
-  // Restore narrative cache from storage so reopening the popup is instant
-  narrativePushedAt = stored.narrativePushedAt ?? null;
-  if (stored.narrativeTexts && narrativePushedAt === currentPayload?.pushed_at) {
-    Object.assign(narrativeCache, stored.narrativeTexts);
-  }
 
   applyTheme(theme);
   syncHeaderControls();
@@ -77,9 +68,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   render(lastDetectedSymbol);
 
-  // Request fresh fetch from SW if nothing is cached yet
-  if (!currentPayload) {
-    chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
+  // Refresh on open unless the cache is seconds old. The previous condition was
+  // `if (!currentPayload)`, so a STALE cache was never refreshed: the only path
+  // left was the 5 minute background alarm, which does not fire while the machine
+  // is asleep or the MV3 service worker is suspended. Measured 2026-08-04, with
+  // every backend layer healthy (twscrape 51 min cadence, payload 1 min old,
+  // endpoint no-cache): a client cache ~50 min old rendered as "1h 11 min ago",
+  // because the age shown is cache age PLUS the coin's own cycle age.
+  //
+  // Opening the popup is the clearest signal the user wants current numbers.
+  // background.js applies a 10s cooldown to FETCH_NOW, so reopening cannot spam.
+  const payloadAgeMs = currentPayload?.pushed_at
+    ? Date.now() - new Date(currentPayload.pushed_at).getTime()
+    : Infinity;
+  if (payloadAgeMs > 60_000) {
+    chrome.runtime.sendMessage({ type: 'FETCH_NOW' }, () => void chrome.runtime.lastError);
   }
 });
 
@@ -89,12 +92,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   let needsRender = false;
   if (changes.lastPayload) {
     const newPayload = changes.lastPayload.newValue;
-    // Invalidate narrative cache when the feed cycle advances
-    if (newPayload?.pushed_at && newPayload.pushed_at !== narrativePushedAt) {
-      Object.keys(narrativeCache).forEach(k => delete narrativeCache[k]);
-      narrativePushedAt = newPayload.pushed_at;
-      chrome.storage.local.remove('narrativeTexts');
-    }
     currentPayload = newPayload;
     needsRender = true;
   }
@@ -182,6 +179,23 @@ function wireInteractions() {
     renderPickerList(pickerSearchInput.value.trim().toUpperCase());
   });
 
+  // Zone A: clicking a busiest-now chip selects that coin in Zone B.
+  const zoneUni = document.getElementById('zone-universe');
+  if (zoneUni) {
+    zoneUni.addEventListener('click', e => {
+      const chip = e.target.closest('.uni-chip');
+      if (!chip || !chip.dataset.symbol) return;
+      const sym = chip.dataset.symbol;
+      if (!trackedCoins.includes(sym)) {
+        if (!isPro) return;                 // never reachable: free chips are not buttons
+        trackedCoins = trackedCoins.concat([sym]);
+        chrome.storage.local.set({ trackedCoins });
+        render(lastDetectedSymbol);
+      }
+      selectSearchCoin(sym);
+    });
+  }
+
   pickerSortChipsEl.addEventListener('click', e => {
     const chip = e.target.closest('.sort-chip');
     if (!chip) return;
@@ -256,7 +270,7 @@ function wireInteractions() {
   onboardingContinueBtn.addEventListener('click', () => {
     onboardingPanel.classList.add('hidden');
     // Trigger a fetch if the background hasn't cached a payload yet
-    if (!currentPayload) chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
+    if (!currentPayload) chrome.runtime.sendMessage({ type: 'FETCH_NOW' }, () => void chrome.runtime.lastError);
     openPicker();
   });
 
@@ -306,8 +320,9 @@ function wireInteractions() {
     // Find coin data and re-render bars
     var sym = card.dataset.symbol;
     var coin = (currentPayload?.coins ?? []).find(function (c) { return c.symbol === sym; });
-    if (!coin?.sparkline?.length) return;
-    var agg = SparklineCore.aggregateSparkline(coin.sparkline, coin.sparkline_tone, coin.sparkline_ts, tf, { posArr: coin.sparkline_pos, negArr: coin.sparkline_neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
+    var sp = coin?.spark;
+    if (!sp?.v?.length) return;
+    var agg = SparklineCore.aggregateSparkline(sp.v, sp.tone, sparkTimestamps(sp), tf, { posArr: sp.pos, negArr: sp.neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
     var wrap = card.querySelector('.sparkline-chart-wrap');
     if (wrap) setHTML(wrap, buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, tf, agg.keys, agg.pos, agg.neg));
   }, true);
@@ -399,9 +414,91 @@ function resolveSymbol(raw, payloadCoins) {
 }
 
 // ── Main render ───────────────────────────────────────────────────────
+// ── Zone A: the universe ──────────────────────────────────────────────
+// Renders with ZERO tracked coins. Looking up one coin is uneventful most of the
+// time; "what is loud across 278 coins" never is. This is what makes the popup
+// worth opening when every tracked coin is quiet.
+function renderUniverse() {
+  const el = document.getElementById('zone-universe');
+  if (!el) return;
+  const u = currentPayload?.universe;
+  if (!u) { el.innerHTML = ''; return; }
+
+  var html = '';
+
+  // Market pulse - a trailing DAILY average, never the latest cycle. It moves
+  // ~1.4 points a day, so it reads as ambient context, not a headline.
+  const mk = u.market;
+  if (mk && mk.value != null) {
+    const rank = mk.pct_rank;
+    // Show only the RELATIVE reading. The absolute share sits in a narrow band
+    // (64-76% over 30 days), so printing "66% positive" beside "more negative
+    // than usual" reads as a contradiction even though both are true.
+    const mood = rank >= 80 ? 'much busier with positive talk than usual'
+               : rank >= 60 ? 'more positive than usual'
+               : rank >= 40 ? 'about as positive as usual'
+               : rank >= 20 ? 'less positive than usual'
+               : 'much less positive than usual';
+    html += '<div class="uni-row uni-market" data-tooltip="' +
+      esc('Across all tracked coins, how positive the conversation is today compared with the last ' +
+          mk.days + ' days. Sits in the ' + rank + 'th percentile of that window. ' +
+          'Describes the mood of the conversation, not the market.') + '">' +
+      '<span class="uni-label">Market conversation</span>' +
+      '<span class="uni-value">' + esc(mood) + '</span>' +
+    '</div>';
+  }
+
+  // Loudest right now - gated on an absolute post floor so it cannot fill with
+  // one-post microcaps.
+  if (u.loudest && u.loudest.length) {
+    const chips = u.loudest.slice(0, 5).map(function (d) {
+      const tracked   = trackedCoins.includes(d.symbol);
+      const canAct    = tracked || isPro;   // Pro can add; free can only view what it tracks
+      // Colour by the SAME band the card uses, so a chip and the coin's own
+      // scale strip always agree. `d.state` only distinguishes spike, which left
+      // busy and steady coins rendering identically in plain white.
+      const band      = attentionBand(d.ratio);
+      const hot       = band ? ' state-' + band.toLowerCase() : '';
+      const base      = d.symbol + ' · ' + d.ratio.toFixed(1) + '× its usual accounts, '
+                      + d.posts + ' posts';
+      const tip = tracked ? base + '. Click to view.'
+                : isPro   ? base + '. Click to track it.'
+                          : base + '.';
+      if (!canAct) {
+        return '<span class="uni-chip static' + hot + '" data-tooltip="' + esc(tip) + '">' +
+               esc(d.symbol) + '</span>';
+      }
+      return '<button class="uni-chip' + hot + '" data-symbol="' + esc(d.symbol) +
+             '" data-tooltip="' + esc(tip) + '">' + esc(d.symbol) + '</button>';
+    }).join('');
+    html += '<div class="uni-row uni-loud">' +
+      '<span class="uni-label" data-tooltip="' +
+        esc('Coins with the most unusual posting activity relative to their own recent norm.') +
+        '">Busiest now</span>' +
+      '<span class="uni-chips">' + chips + '</span>' +
+    '</div>';
+  }
+
+  html += '<div class="uni-row uni-stats">' +
+    '<span class="uni-stat">' + u.coins_tracked + ' coins · ' + u.active_coins + ' active</span>' +
+    // "86 busier than usual" read as a dropped word. The subject is coins, and
+    // the strip has room to say so.
+    (u.busy ? '<span class="uni-stat">' + u.busy +
+       (u.busy === 1 ? ' coin' : ' coins') + ' busier than usual</span>' : '') +
+    // Was a ternary with both branches identical, so it never varied. "unusual"
+    // is an adjective here and does not inflect; the count carries the number.
+    (u.spiking ? '<span class="uni-stat uni-hot">' + u.spiking + ' unusual</span>' : '') +
+  '</div>';
+
+  setHTML(el, html);
+}
+
 function render(detectedSymbol) {
+  renderUniverse();
+
   if (!currentPayload) {
     cardAreaEl.innerHTML = '<p class="no-data-msg">Loading data...</p>';
+    updateStatusBar(null);   // no coin on screen, so no freshness stamp
     return;
   }
 
@@ -411,6 +508,7 @@ function render(detectedSymbol) {
         '<p class="feed-banner-msg">Data temporarily unavailable. ' +
         'The extension will recover automatically.</p>' +
       '</div>';
+    updateStatusBar(null);
     return;
   }
 
@@ -427,14 +525,17 @@ function render(detectedSymbol) {
     specs.push({ type: 'teaser', symbol: detected, coin: coinMap[detected] });
   }
 
-  // Normal cards for tracked coins (Pro: sorted by chatter level)
+  // Normal cards for tracked coins (Pro: sorted by attention).
+  // Sorts on the CONTINUOUS ratio, never the spike boolean - the boolean fires on
+  // ~1% of coin-cycles, so sorting by it would collapse the ordering and make the
+  // Pro sort worse than the four buckets it replaced.
   const effectiveTracked = isPro ? trackedCoins.slice() : trackedCoins.slice(0, FREE_LIMIT);
   if (isPro) {
-    const levelOrder = { Spiking: 0, Buzzing: 1, Active: 2, Quiet: 3 };
     effectiveTracked.sort((a, b) => {
-      const la = coinMap[a]?.chatter?.ok ? (levelOrder[coinMap[a].chatter.level] ?? 4) : 4;
-      const lb = coinMap[b]?.chatter?.ok ? (levelOrder[coinMap[b].chatter.level] ?? 4) : 4;
-      return la - lb;
+      const ra = coinMap[a]?.attention?.ratio ?? -1;
+      const rb = coinMap[b]?.attention?.ratio ?? -1;
+      if (rb !== ra) return rb - ra;
+      return a.localeCompare(b);
     });
   }
   effectiveTracked.forEach(sym => {
@@ -503,23 +604,22 @@ function buildGhostCardHtml(symbol, visClass) {
 }
 
 function buildTeaserCardHtml(symbol, coin, visClass) {
-  const level = coin?.chatter?.ok ? coin.chatter.level : null;
-  const isHot = level === 'Buzzing' || level === 'Spiking';
-  const badgeHtml = level
-    ? '<span class="level-badge ' + level.toLowerCase() + '">' + esc(level.toUpperCase()) + '</span>'
+  const isHot = coin?.attention?.state === 'spike';
+  const badgeHtml = isHot
+    ? '<span class="level-badge spike">UNUSUAL ATTENTION</span>'
     : '';
   const canAdd = isPro || trackedCoins.length < FREE_LIMIT;
   var ctaText;
   if (canAdd) {
     ctaText = isHot
-      ? esc(symbol) + ' is getting unusual chatter. '
+      ? esc(symbol) + ' is getting unusual attention. '
       : '';
     ctaText += '<a href="#" class="teaser-add-link" data-symbol="' + esc(symbol) + '">Add ' + esc(symbol) + ' to your tracked coins.</a>';
   } else {
     ctaText = isHot
-      ? esc(symbol) + ' is getting unusual chatter. '
+      ? esc(symbol) + ' is getting unusual attention. '
       : '';
-    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 250+ coins.</a>' +
+    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 270+ coins.</a>' +
       '<br><span class="teaser-hint">Or press <strong>Edit</strong> to replace one of your tracked coins.</span>';
   }
   return '<div class="card teaser-card ' + visClass + '" data-symbol="' + esc(symbol) + '">' +
@@ -531,14 +631,72 @@ function buildTeaserCardHtml(symbol, coin, visClass) {
   '</div>';
 }
 
+// ── Activity bands ────────────────────────────────────────────────────
+// v1 had four visual states off the Engagement Coefficient. EC is retired, but
+// the gradation was useful - two states (spike / not spike) throws away the
+// middle. These band the CONTINUOUS attention ratio instead, so the scale and
+// the badge come from the same number.
+//   Quiet   < 0.5x its own normal
+//   Steady  0.5x - 1.5x
+//   Busy    1.5x - 6x
+//   Unusual >= 6x   (the published spike threshold)
+const ATTN_BANDS = ['Quiet', 'Steady', 'Busy', 'Unusual'];
+
+// One short line for the footer, whatever the universe is doing. Falls back from
+// unusual to busy to a plain count so the string never grows long enough to wrap.
+function universeHeadline(spiking) {
+  const busy = currentPayload?.universe?.busy ?? 0;
+  const tracked = currentPayload?.universe?.coins_tracked ?? 0;
+  if (spiking > 0) {
+    return spiking + (spiking === 1 ? ' coin has' : ' coins have') + ' unusual activity.';
+  }
+  if (busy > 0) {
+    return busy + (busy === 1 ? ' coin is' : ' coins are') + ' busier than usual.';
+  }
+  return tracked ? 'Tracking ' + tracked + ' coins.' : 'Tracking 270+ coins.';
+}
+
+function attentionBand(ratio) {
+  if (ratio == null) return null;
+  if (ratio >= 6)   return 'Unusual';
+  if (ratio >= 1.5) return 'Busy';
+  if (ratio >= 0.5) return 'Steady';
+  return 'Quiet';
+}
+
+function buildScaleHtml(band) {
+  const tips = {
+    Quiet:   'Fewer accounts posting than\nusual for this coin',
+    Steady:  'About as many accounts as\nusual for this coin',
+    Busy:    'Noticeably more accounts\nposting than usual',
+    Unusual: 'At least 6x its usual number\nof posting accounts'
+  };
+  var inner = '';
+  ATTN_BANDS.forEach(function (s, i) {
+    inner += '<span class="scale-step' + (s === band ? ' current' : '') +
+             '" data-tooltip="' + tips[s] + '">' + s + '</span>';
+    if (i < ATTN_BANDS.length - 1) inner += '<span class="scale-divider">&#x203A;</span>';
+  });
+  return '<div class="level-scale">' + inner + '</div>';
+}
+
 function buildNormalCardHtml(coin, visClass) {
   const sym   = coin.symbol;
-  const level = coin.chatter?.ok ? coin.chatter.level : null;
-  const stCls = level ? 'state-' + level.toLowerCase() : '';
+  const state = coin.attention?.state || null;
+  const band  = attentionBand(coin.attention?.ratio);
+  const stCls = band ? 'state-' + band.toLowerCase() : '';
 
-  const badgeHtml = level
-    ? '<span class="level-badge ' + level.toLowerCase() + '" data-tooltip="' +
-        esc(levelBadgeTooltip(level)) + '">' + esc(level.toUpperCase()) + '</span>'
+  // Only a genuine spike earns a badge. It fires on ~1% of coin-cycles, which is
+  // exactly what makes it worth showing.
+  //
+  // The tooltip describes POSTING ONLY. An earlier version tied this reading to
+  // market behaviour. Hedging such a sentence does not undo the link it draws,
+  // and it was the one place the extension connected a social count to anything
+  // outside the conversation. Keep this text about posting.
+  const badgeHtml = state === 'spike'
+    ? '<span class="level-badge spike" data-tooltip="' +
+        esc('Unusually many accounts are posting about this coin, at least 6x its own recent median. That describes the conversation, not the price.') +
+        '">UNUSUAL</span>'
     : '';
 
   return '<div class="card ' + stCls + ' ' + visClass + '" data-symbol="' + esc(sym) + '">' +
@@ -546,60 +704,62 @@ function buildNormalCardHtml(coin, visClass) {
       '<span class="coin-symbol">' + esc(sym) + '</span>' +
       badgeHtml +
     '</div>' +
-    buildScaleHtml(level) +
+    buildScaleHtml(band) +
     buildSparklineHtml(coin) +
     '<div class="data-rows">' + buildRowsHtml(coin) + '</div>' +
-    '<div class="narrative-area" data-symbol="' + esc(sym) + '"></div>' +
-    '<div class="card-footer-row">' +
-      buildXLink(sym, level) +
-      '<span class="updated-ago" data-tooltip="Data arrives in full sweeps of all coins, paced over ~40 min for exchange API limits. The clock counts from the sweep\'s start, so 55-95 min is normal - and all coins update together.">' + buildUpdatedAgo(coin) + '</span>' +
-    '</div>' +
-    '<p class="card-disclaimer">Social chatter data only. Not a trading signal. Data may be delayed.</p>' +
+    // Disclaimer and freshness stamp now live in the fixed .status-bar above the
+    // footer, not here, so they cannot be pushed out by tall card content.
+    (buildXLink(sym, band) ? '<div class="card-footer-row card-footer-link">' + buildXLink(sym, band) + '</div>' : '') +
   '</div>';
 }
-
-// ── Level scale strip ─────────────────────────────────────────────────
-function buildScaleHtml(level) {
-  const steps = ['Quiet', 'Active', 'Buzzing', 'Spiking'];
-  const tips = {
-    Quiet:   'EC ratio < 0.5x\nthe coin\'s 30-day average',
-    Active:  'EC ratio 0.5x - 2x\nthe coin\'s 30-day average',
-    Buzzing: 'EC ratio 2x - 6x\nthe coin\'s 30-day average',
-    Spiking: 'EC ratio > 6x\nthe coin\'s 30-day average'
-  };
-  var inner = '';
-  steps.forEach(function (s, i) {
-    const cur = s === level ? ' current' : '';
-    inner += '<span class="scale-step' + cur + '" data-tooltip="' + tips[s] + '">' + s + '</span>';
-    if (i < steps.length - 1) inner += '<span class="scale-divider">&#x203A;</span>';
-  });
-  return '<div class="level-scale">' + inner + '</div>';
-}
-
-// ── Sparkline ─────────────────────────────────────────────────────────
-
-var CYCLE_DAYS = 7; // rolling 7-day window for per-cycle bars
 
 function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, negArr) {
   var logVals = vals.map(function (v) { return Math.log1p(v); });
   var logMax  = Math.max.apply(null, logVals);
   var logMean = logVals.reduce(function (a, b) { return a + b; }, 0) / logVals.length;
   var avgPct  = logMax > 0 ? Math.round((logMean / logMax) * 100) : 0;
-  // Position Avg label in y-axis: 14px padding offset + avgPct% of 56px sparkline height
-  var avgLabelBottom = (14 + Math.round(avgPct * 0.56)) + 'px';
+  // 13 = .y-axis padding-bottom, 0.52 = .sparkline height 52px / 100.
+  // Both are mirrored from popup.css; if the chart height changes, change all
+  // three together or the Avg label drifts off the dashed baseline.
+  // Clamped so it cannot collide with the fixed High and Low labels. A coin whose
+  // bars sit consistently near its own max has avgPct in the 90s (OM: 92), which
+  // put "Avg" at 61px against "High" at ~65 and printed the two on top of each
+  // other. 11px of clearance either end keeps the 10px labels apart.
+  // The Avg LABEL must sit on the Avg LINE, which is drawn at `bottom: avgPct%`
+  // of the bars. Clamping the label to avoid a collision detaches it from the
+  // line it names, which trades one defect for another.
+  //
+  // Geometry: y-axis box = 52px bars + 13px padding = 65px; "High" is the top
+  // flex item (bottom 55..65), "Low" the bottom one (bottom 13..23); "Avg" is
+  // absolute and 10px tall, so its top is bottom+10.
+  //
+  // When the mean sits near the max, High and Avg mark the SAME place and
+  // printing both is meaningless as well as unreadable (OM: avgPct 92). So the
+  // colliding endpoint label is dropped and Avg keeps its true position.
+  var avgLabelBottom = (13 + Math.round(avgPct * 0.52)) + 'px';
+  var avgTop = 13 + Math.round(avgPct * 0.52) + 10;
+  var showHigh = avgTop <= 55;                       // Avg clears "High"
+  var showLow  = 13 + Math.round(avgPct * 0.52) >= 23; // Avg clears "Low"
 
   var bars = '';
   vals.forEach(function (v, i) {
     var h = logMax > 0 ? Math.round((logVals[i] / logMax) * 100) : 0;
     var t = SparklineCore.toneClass(tones && tones[i]);
-    var ecFmt = v >= 1000 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(1) : v >= 0.01 ? v.toFixed(2) : '0';
-    var ecLbl = (v <= 0 || ecFmt === '0') ? 'EC 0 (silent)' : 'EC ' + ecFmt;
-    if (mode === 'day')  ecLbl += ' (daily avg)';
-    if (mode === 'week') ecLbl += ' (weekly avg)';
+    // Bars plot distinct_authors_total, so the tooltip says accounts. It read
+    // "EC 63", the v1 Engagement Coefficient, which this has not been since the
+    // v2 rebuild: 63 is a count of accounts, not a weighted engagement score.
+    var nFmt = v >= 1000 ? Math.round(v).toLocaleString() : String(Math.round(v));
+    var ecLbl = v <= 0 ? 'No posts'
+              : nFmt + (Math.round(v) === 1 ? ' account' : ' accounts');
+    if (mode === 'day')  ecLbl += ', daily average';
+    if (mode === 'week') ecLbl += ', weekly average';
     var dateLbl = SparklineCore.formatBarDate(stamps && stamps[i], mode, bucketKeys && bucketKeys[i]);
     var toneLbl = '';
     if (tones && tones[i] != null) {
-      toneLbl = 'Shift ' + (tones[i] > 0 ? '+' : '') + tones[i];
+      // "Shift" was v1, where tone moved against a rolling baseline. This value
+      // is positive share minus negative share for the period, a balance rather
+      // than a movement.
+      toneLbl = 'Net tone ' + (tones[i] > 0 ? '+' : '') + tones[i];
     }
     var tipLines = [ecLbl];
     if (toneLbl) tipLines.push(toneLbl);
@@ -613,9 +773,9 @@ function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, n
 
   return '<div class="sparkline-chart">' +
     '<div class="y-axis">' +
-      '<span class="y-label">High</span>' +
+      '<span class="y-label">' + (showHigh ? 'High' : '') + '</span>' +
       '<span class="y-label y-avg" style="bottom:' + avgLabelBottom + '">Avg</span>' +
-      '<span class="y-label">Low</span>' +
+      '<span class="y-label">' + (showLow ? 'Low' : '') + '</span>' +
     '</div>' +
     '<div class="sparkline-bars-wrap">' +
       '<div class="sparkline sparkline-tf-' + mode + '" aria-hidden="true">' +
@@ -630,24 +790,49 @@ function buildSparklineBarsHtml(vals, tones, stamps, mode, bucketKeys, posArr, n
   '</div>';
 }
 
-function buildSparklineHtml(coin) {
-  var sl   = coin.sparkline;
-  var tone = coin.sparkline_tone;
-  var ts   = coin.sparkline_ts;
+// Rehydrate the v2 spark encoding: a base timestamp plus integer minute
+// offsets, instead of one ISO string per point. That encoding is what took the
+// payload from 3.69 MB to 1.75 MB.
+var CYCLE_DAYS = 7; // rolling 7-day window for per-cycle bars
 
+function sparkTimestamps(sp) {
+  if (!sp || !sp.t0 || !sp.dt) return null;
+  var base = new Date(sp.t0.replace('Z', '+00:00')).getTime();
+  return sp.dt.map(function (m) {
+    return new Date(base + m * 60000).toISOString().slice(0, 16) + 'Z';
+  });
+}
+
+function buildSparklineHtml(coin) {
+  var sp   = coin.spark;
+  var sl   = sp?.v;
+  var tone = sp?.tone;
+  var ts   = sparkTimestamps(sp);
+
+  // Decide the mode BEFORE building the header, so the highlighted button and
+  // the bars drawn can never disagree.
+  //
+  // Day by default, because every row below the chart is a 24h figure. A
+  // per-cycle newest bar beside 24h rows is what produced "mostly positive"
+  // next to a red candle. C is still one click away for the live view.
+  var mode = 'day';
+  var cycleMin = Math.round((currentPayload?.cycle_minutes_approx ?? 50) / 5) * 5;
   var headerHtml =
     '<div class="sparkline-header">' +
-      '<span class="sparkline-label" data-tooltip="How much people are talking about this coin.&#10;Each bar covers one update window (~2h); the newest bar is the latest update.&#10;Taller bars = more engagement.&#10;Colors show tone.">Chatter activity</span>' +
+      '<span class="sparkline-label" data-tooltip="How many distinct accounts posted about this coin.&#10;Each bar is one day by default. Use the buttons to switch between per-update, daily and weekly bars.&#10;Taller bars = more accounts posting.&#10;Colour shows the tone of those posts.">Posting activity</span>' +
       '<div class="sparkline-controls">' +
-        '<div class="sparkline-tf" data-tooltip="Switch timeframe: per-cycle, daily, or weekly bars.">' +
-          '<button class="tf-btn active" data-tf="cycle">C</button>' +
-          '<button class="tf-btn" data-tf="day">D</button>' +
-          '<button class="tf-btn" data-tf="week">W</button>' +
+        '<div class="sparkline-tf">' +
+          '<button class="tf-btn' + (mode === 'cycle' ? ' active' : '') + '" data-tf="cycle" ' +
+            'data-tooltip="One bar per update, the freshest view, about every ' + cycleMin + ' minutes.">' + cycleMin + 'm</button>' +
+          '<button class="tf-btn' + (mode === 'day'   ? ' active' : '') + '" data-tf="day" ' +
+            'data-tooltip="One bar per day, over the last 30 days.">Day</button>' +
+          '<button class="tf-btn" data-tf="week" ' +
+            'data-tooltip="One bar per week, over the last 4 weeks.">Week</button>' +
         '</div>' +
-        '<div class="sparkline-legend">' +
-          '<span class="legend-dot positive"></span><span class="legend-text">Pos. shift</span>' +
-          '<span class="legend-dot negative"></span><span class="legend-text">Neg. shift</span>' +
-          '<span class="legend-dot mixed"></span><span class="legend-text">Baseline</span>' +
+        '<div class="sparkline-legend" data-tooltip="Bar colour shows the tone of those posts: green above this coin\u2019s usual level, red below, grey near it.">' +
+          '<span class="legend-dot positive"></span>' +
+          '<span class="legend-dot negative"></span>' +
+          '<span class="legend-dot mixed"></span>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -659,136 +844,244 @@ function buildSparklineHtml(coin) {
       '</div>';
   }
 
-  var agg = SparklineCore.aggregateSparkline(sl, tone, ts, 'cycle', { posArr: coin.sparkline_pos, negArr: coin.sparkline_neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
-  var barsHtml = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, 'cycle', agg.keys, agg.pos, agg.neg);
+  // Day by default: at cycle granularity only ~26% of coins clear the 5-post
+  // threshold, versus ~77% at day level. Spiking coins switch to Cycle, where
+  // the finer granularity is the point.
+  var agg = SparklineCore.aggregateSparkline(sl, tone, ts, mode, { posArr: sp.pos, negArr: sp.neg, cycleMinutes: currentPayload?.cycle_minutes_approx, windowDays: CYCLE_DAYS });
+  var barsHtml = buildSparklineBarsHtml(agg.vals, agg.tones, agg.stamps, mode, agg.keys, agg.pos, agg.neg);
 
   return headerHtml + '<div class="sparkline-chart-wrap">' + barsHtml + '</div>';
 }
 
 // ── Data rows ─────────────────────────────────────────────────────────
+// ── Zone B data rows (v2) ─────────────────────────────────────────────
+// Every row is DESCRIPTIVE. Nothing states or implies a price direction: tone
+// describes what posts say, attention describes how many people are posting.
 function buildRowsHtml(coin) {
   var html = '';
 
-  // Chatter tone row - shift-based when baseline available, fallback to raw net otherwise
-  const toneShift = coin.chatter?.tone_shift;
-  const toneRaw = coin.chatter?.tone_raw;
-  const toneBaseline = coin.chatter?.tone_baseline;
-  if (toneShift != null) {
-    const tCls = toneClass(toneShift);
-    var shiftFmt = (toneShift > 0 ? '+' : '') + toneShift;
-    var label = toneLabel(toneShift);
-    var baselineFmt = toneBaseline != null ? ((toneBaseline > 0 ? '+' : '') + toneBaseline) : '?';
-    var toneTooltipText = label + ' (shift ' + shiftFmt + '). This coin\'s 30-day baseline is ' + baselineFmt + '. Current sentiment has shifted ' + Math.abs(toneShift) + ' points ' + (toneShift >= 0 ? 'above' : 'below') + ' its usual level.';
-    html += '<div class="data-row">' +
-      '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
-      '<span class="row-value ' + tCls + '" data-tooltip="' + esc(toneTooltipText) + '">' +
-        esc(label + ' \u00B7 ' + shiftFmt + ' shift') +
-      '</span>' +
+  const att = coin.attention;
+  if (!att || att.ratio == null) {
+    html += reasonRow('Latest update',
+      'How many accounts posted in the most recent update window, against this coin\u2019s own recent normal.',
+      coin, 'attention');
+  }
+  if (att && att.ratio != null) {
+    const r = att.ratio;
+    // A silent cycle is an absence, not a measurement. "0.0x usual" would read as
+    // a reading; "no posts" says what actually happened.
+    const val = att.silent
+      ? 'no posts'
+      : (r >= 10 ? Math.round(r) : r.toFixed(1)) + '× usual';
+    // Coloured by BAND, matching the scale strip above, the chips in the universe
+    // row and the card's left rail. Keying on `att.state` meant a coin at 5.0x
+    // came back "intermediate" and rendered plain white while the strip beside it
+    // highlighted "Busy" in cyan.
+    const attnBand = attentionBand(r);
+    const cls = att.silent ? 'attn-none'
+      : (attnBand ? 'attn-' + attnBand.toLowerCase() : '');
+    // Same source as the status bar's stamp, so the two can never disagree.
+    const age = formatAgo(coinAgeMin(coin)) || 'latest update';
+    // "Latest update", not "Right now": the value is from the most recent
+    // completed sweep, which the age beside it says is minutes old. Claiming
+    // "right now" beside "18 min ago" contradicts itself on the same line.
+    html += '<div class="data-row row-live">' +
+      '<span class="row-label" data-tooltip="' +
+        esc('How many accounts posted in the most recent update window, against this coin\u2019s own recent normal. This is the freshest reading we have, everything below it covers the last 24 hours.') +
+      '">Latest update <span class="row-age">' + esc(age) + '</span></span>' +
+      '<span class="row-value ' + cls + '" data-tooltip="' +
+        esc(att.silent
+            ? 'Nobody posted about this coin in the most recent update window. The rows below still cover the last 24 hours.'
+            : att.pct_rank != null
+            ? 'Busier than ' + att.pct_rank + '% of the coins we track in this update.'
+            : 'Compared with this coin\u2019s own recent average.') +
+      '">' + esc(val) + '</span>' +
     '</div>';
-  } else if (toneRaw != null) {
-    var rawFmt = (toneRaw > 0 ? '+' : '') + toneRaw;
-    var fbLabel = toneFallbackLabel(toneRaw);
-    var fbCls = toneFallbackClass(toneRaw);
-    var fbTooltip = fbLabel + ' (net ' + rawFmt + '). Not enough history yet to compute a baseline shift. Label will become more precise as data accumulates.';
-    html += '<div class="data-row">' +
-      '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
-      '<span class="row-value ' + fbCls + '" data-tooltip="' + esc(fbTooltip) + '">' +
-        esc(fbLabel + ' \u00B7 ' + rawFmt + ' net') +
-      '</span>' +
-    '</div>';
-  } else if (coin.chatter?.ok) {
-    // Tone hidden this cycle - say WHY. A viral 2-post spike can push the
-    // chatter level high while tone still needs >= 5 posts to read reliably.
-    var toneNA = {
-      few_posts: ['Too few posts',
-        'Fewer than 4 posts about this coin in the last update. Chatter level can still be high - engagement weighs likes and reach, so a couple of viral posts can spike it - but tone needs at least 4 posts to classify reliably.'],
-      low_confidence: ['Unclear tone',
-        'There were enough posts, but the language was too mixed or ambiguous to call a direction confidently.'],
-      stale_sentiment: ['Awaiting fresh data',
-        'The latest sentiment reading is older than usual. Tone will return with the next fresh update.']
-    }[coin.chatter?.tone_reason] || ['Insufficient data',
-        'Not enough data to determine sentiment reliably in the last update.'];
-    html += '<div class="data-row">' +
-      '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
-      '<span class="row-value" data-tooltip="' + esc(toneNA[1]) + '">' + esc(toneNA[0]) + '</span>' +
-    '</div>';
+  }
+  // Emitted once, outside both branches: it labels the rows BELOW it, so it is
+  // correct whether or not the live row above it could be filled.
+  html += '<div class="rows-divider"><span>Last 24 hours</span></div>';
+
+  const tone = coin.tone;
+  if (!tone) {
+    html += reasonRow('Tone of posts',
+      'How positive or negative the posts were, over the last 24 hours.',
+      coin, 'tone');
+  }
+  if (tone) {
+    const cls = tone.pos - tone.neg >= 10 ? 'tone-positive'
+              : (tone.neg - tone.pos >= 10 ? 'tone-negative' : 'tone-neutral');
+    html += dataRow('Tone of posts',
+      'The mix of positive, neutral and negative language across the last 24 hours.',
+      tone.label + ' · ' + tone.pos + '/' + tone.neu + '/' + tone.neg,
+      tone.pos + '% positive, ' + tone.neu + '% neutral and ' + tone.neg
+        + '% negative, across ' + tone.posts + ' posts in the last 24 hours.',
+      cls);
+  }
+
+  // Outside the tone branch: conviction is a separate measurement that can exist
+  // when tone does not, so nesting it hid a value we actually had.
+  const CONV_LABEL = { consistent: 'clear', split: 'mixed', contested: 'unclear' };
+  const CONV_TIP = {
+    consistent: 'Most posts leaned the same way, so the tone reading is a fair summary.',
+    split: 'Opinion was divided, with strongly positive and strongly negative posts and little in between.',
+    contested: 'Posts pulled in different directions, so treat the tone above as a rough summary.'
+  };
+  if (coin.conviction) {
+    html += dataRow('How clear-cut',
+      'Whether posts mostly agreed with each other, or were all over the place.',
+      CONV_LABEL[coin.conviction], CONV_TIP[coin.conviction] || '');
   } else {
-    html += '<div class="data-row">' +
-      '<span class="row-label" data-tooltip="How sentiment compares to this coin\'s own 30-day average.">Chatter tone</span>' +
-      '<span class="quality-label" data-tooltip="No chatter detected in the past 30 days.">Silent</span>' +
+    html += reasonRow('How clear-cut',
+      'Whether posts mostly agreed with each other, or were all over the place.',
+      coin, 'conviction');
+  }
+
+  // Topics: what is DISCUSSED. Deliberately NOT framed as explaining the tone -
+  // they come from different classifiers and ~65% of scored posts contain no
+  // category vocabulary at all, which is why coverage is shown.
+  const tp = coin.topics;
+  if (!tp || !tp.items || !tp.items.length) {
+    html += reasonRow('Discussed',
+      'The topics people raised: hype, fear, scam talk, memes.',
+      coin, 'topics');
+  }
+  if (tp && tp.items && tp.items.length) {
+    // Each topic carries its OWN tooltip with the full word list. Inlining the
+    // words made the row wrap and skew, and only ever showed one of them.
+    const parts = tp.items.map(function (it) {
+      const head = it.label.charAt(0).toUpperCase() + it.label.slice(1)
+                 + ', ' + it.count + (it.count === 1 ? ' mention' : ' mentions') + '.';
+      // Not every matched word is available to display: the counts come from a
+      // much larger vocabulary than the sample of words we can show.
+      //
+      // "Examples" is load-bearing, do not change it to "Top words" or "Most
+      // common". The builder collapses inflections of one stem (OP returned
+      // optimism / with optimism / love the optimism / optimism about / some
+      // optimism, five slots for one word), so these are five distinct words
+      // drawn from the top matches, not the five most frequent. Every word shown
+      // is a real match and the count includes all of them, so "Examples" is
+      // true; a ranking claim would not be.
+      const words = (it.terms && it.terms.length)
+        ? ' Examples: ' + it.terms.join(', ') + '.'
+        : '';
+      return '<span class="topic-tag' + (it.terms && it.terms.length ? '' : ' no-terms') +
+        '" data-tooltip="' + esc(head + words) + '">' + esc(it.label) + '</span>';
+    });
+    const tip = 'Topic words spotted across ' + tp.total_posts + ' posts in the last '
+      + '24 hours, using a curated crypto vocabulary. Hover each topic for the words '
+      + 'behind it. Separate from tone, a positive conversation can still discuss risks.';
+    html += '<div class="data-row topics-row">' +
+      '<span class="row-label" data-tooltip="' + esc(tip) + '">Discussed</span>' +
+      '<span class="row-value topics-value">' + parts.join('<span class="topic-sep"> · </span>') + '</span>' +
     '</div>';
   }
 
-  // Chatter volume row - raw posts/authors; engagement + reach live in tooltips
-  const cv = coin.chatter;
-  if (cv?.ok && cv.posts != null) {
-    var cvLikes = cv.likes || 0, cvRts = cv.retweets || 0;
-    var postsTip = (cvLikes + cvRts) > 0
-      ? 'These posts collected ' + fmtCount(cvLikes) + ' likes and ' + fmtCount(cvRts) + ' retweets in the last update window.'
-      : 'No likes or retweets yet in the last update window.';
-    var cvAuth = cv.distinct_authors || 0;
-    var authTip = (cv.followers_sum != null && cvAuth > 0)
-      ? 'Combined reach of ' + fmtCount(cv.followers_sum) + ' followers - about ' + fmtCount(Math.round(cv.followers_sum / cvAuth)) + ' per author on average.'
-      : 'Unique accounts that posted about this coin in the last update window.';
-    var cvLabelTip = 'How much this coin is being talked about right now.';
-    if (cv.ec != null) {
-      cvLabelTip += ' Engagement coefficient ' + fmtCount(cv.ec) + (
-        cv.ec_ratio == null ? '.' :
-        cv.ec_ratio < 0.1 ? ' - well below this coin\'s own 30-day average.' :
-        ' - about ' + cv.ec_ratio + 'x this coin\'s own 30-day average.');
+  const cr = coin.crowd;
+  if (!cr) {
+    html += reasonRow('Who\u2019s posting',
+      'Distinct accounts posting about this coin in the last 24 hours.',
+      coin, 'crowd');
+  }
+  if (cr) {
+    var who = cr.authors + (cr.authors === 1 ? ' account' : ' accounts');
+    // "at least", because verified accounts cannot be de-duplicated across
+    // updates: this is the busiest single update's count, a lower bound on the
+    // day. The plain account count beside it IS a true 24h figure.
+    if (cr.blue) who += ' \u00B7 ' + cr.blue + '+ verified';
+    var whoTip = 'Distinct accounts posting in the last 24 hours.';
+    if (cr.blue) {
+      whoTip += ' At least ' + cr.blue + ' were verified, counted from the busiest'
+             + ' single update, so the true figure over the day may be higher.';
     }
-    html += '<div class="data-row">' +
-      '<span class="row-label" data-tooltip="' + esc(cvLabelTip) + '">Chatter volume</span>' +
-      '<span class="row-value">' +
-        '<span data-tooltip="' + esc(postsTip) + '">' + cv.posts + (cv.posts === 1 ? ' post' : ' posts') + '</span>' +
-        ' · ' +
-        '<span data-tooltip="' + esc(authTip) + '">' + cvAuth + (cvAuth === 1 ? ' author' : ' authors') + '</span>' +
-      '</span>' +
-    '</div>';
+    html += dataRow('Who\u2019s posting',
+      'Distinct accounts posting about this coin in the last 24 hours.', who, whoTip);
   }
 
-  // Volume row (after tone, before futures)
-  if (coin.volume?.ok) {
-    html += dataRow('24h volume',
-      '24-hour rolling trading volume on Binance spot.',
-      coin.volume.usd_fmt + ' \u00B7 ' + coin.volume.label,
-      volumeTooltip(coin.volume.label), '');
+  // One quantity, one comparison. The earlier version showed "30 posts from 21
+  // · below usual" and then a tooltip quoting a THIRD number (72), which read as
+  // three unrelated figures.
+  const ac = coin.activity;
+  if (ac) {
+    var v = ac.posts + (ac.posts === 1 ? ' post' : ' posts');
+    if (ac.usual != null) v += ' · usually ' + ac.usual;
+    html += dataRow('Posts',
+      'Posts about this coin in the last 24 hours, next to what is normal for it.',
+      v,
+      ac.usual != null
+        ? 'This coin averages about ' + ac.usual + ' posts a day over the past two weeks.'
+        : 'We only compare against days measured the same way as today. How posts '
+          + 'are matched to coins changed recently, so there is not yet enough '
+          + 'comparable history to say what is normal here.',
+      ac.relative === 'below' ? 'muted' : '');
   }
 
-  // Futures rows (only when futures gate passes)
-  if (coin.futures?.ok) {
-    var fundingVal = coin.futures.funding_label;
-    if (coin.futures.funding_rate) fundingVal += ' \u00B7 ' + coin.futures.funding_rate + ' / 8h';
-    html += dataRow('Funding',
-      'Perpetual futures funding rate. Shows whether leveraged traders are net long or short.',
-      fundingVal,
-      fundingTooltip(coin.futures.funding_label), '');
-    var oiVal = coin.futures.oi_label;
-    if (coin.futures.oi_usd_fmt) oiVal += ' \u00B7 ' + coin.futures.oi_usd_fmt;
-    html += dataRow('OI flow',
-      'Change in open interest over the last hour. Shows whether new money is entering or leaving derivatives.',
-      oiVal,
-      oiTooltip(coin.futures.oi_label), '');
-    var longPct = coin.futures.whale_pct;
-    var whaleVal = longPct != null ? longPct + '% long / ' + (100 - longPct) + '% short' : '-';
-    var whaleTip = 'Ratio of long to short positions held by top exchange accounts in the last update.';
-    if (coin.futures.whale_ratio != null) {
-      whaleTip += ' Ratio: ' + coin.futures.whale_ratio + '.';
+  const mk = coin.market;
+  if (mk) {
+    if (mk.volume_fmt) {
+      html += dataRow('Volume', 'Traded value over the last 24 hours.',
+        mk.volume_fmt + (mk.volume_label ? ' · ' + mk.volume_label : ''),
+        mk.volume_label ? mk.volume_label + ' compared with the other tracked coins.' : '');
     }
-    html += dataRow('Whale lean',
-      'Long/short ratio of top-account traders, compared to the market\'s own recent range.',
-      whaleVal,
-      whaleTip, '');
-  } else if (coin.futures && coin.futures.reason === 'no_contract') {
-    // Spot-only coin: no perpetual futures contract on Binance.
-    html += dataRow('Derivatives',
-      'Funding, open interest, and whale positioning come from perpetual futures. This coin is spot-only on Binance (no futures contract), so those are unavailable.',
-      'No futures contract',
-      'Spot-only on Binance — no perpetual futures market exists for this coin.',
-      'na');
+    // Two different questions: chg is which way it went, range is how far it
+    // swung between its high and low. A coin can end flat after a 12% swing, so
+    // neither number can be derived from the other. Colour comes from chg only,
+    // because range has no sign to colour. Market facts, stated as such: nothing
+    // here is tied to the sentiment rows above.
+    if (mk.chg_pct_24h != null || mk.range_pct_24h != null) {
+      var pv = '', ptip = '';
+      if (mk.chg_pct_24h != null) {
+        var up = mk.chg_pct_24h > 0, flat = mk.chg_pct_24h === 0;
+        pv = '<span class="' + (flat ? '' : (up ? 'px-up' : 'px-down')) + '">' +
+             (up ? '+' : '') + mk.chg_pct_24h.toFixed(1) + '%</span>';
+        ptip = flat
+          ? 'Price is level with 24 hours ago.'
+          : 'Price is ' + (up ? 'up' : 'down') + ' ' +
+            Math.abs(mk.chg_pct_24h).toFixed(1) + '% against 24 hours ago.';
+      }
+      if (mk.range_pct_24h != null) {
+        pv += (pv ? '<span class="topic-sep"> · </span>' : '') +
+              esc(mk.range_pct_24h.toFixed(1) + '% swing');
+        ptip += (ptip ? ' ' : '') + 'Its high and low over those 24 hours were ' +
+                mk.range_pct_24h.toFixed(1) + '% apart.';
+      }
+      html += '<div class="data-row">' +
+        '<span class="row-label" data-tooltip="' +
+          esc('Change since 24 hours ago, and how far the price swung between its high and low in that time. Market data, shown for context.') +
+        '">Price</span>' +
+        '<span class="row-value" data-tooltip="' + esc(ptip) + '">' + pv + '</span>' +
+      '</div>';
+    }
   }
 
   return html;
+}
+
+// A row explaining why a reading is unavailable, in place of silently dropping it.
+// Muted so it reads as an absence rather than a value.
+const REASON_TEXT = {
+  'tone:too_few_posts': ['not enough posts',
+    'Tone needs at least 5 scored posts over 24 hours. This coin had fewer, and a couple of posts cannot describe a mood.'],
+  'tone:unclear': ['unclear',
+    'Posts were scored but split too evenly to call either way.'],
+  'topics:no_posts': ['no posts',
+    'Nobody posted about this coin in the last 24 hours, so there is nothing to categorise.'],
+  'topics:no_matches': ['nothing recognised',
+    'People posted, but used none of the words in our curated crypto vocabulary.'],
+  'crowd:no_authors': ['nobody posted',
+    'No accounts posted about this coin in the last 24 hours.'],
+  'attention:no_baseline': ['too rarely discussed',
+    'We compare each update against this coin\u2019s own normal, which needs at least 5 earlier updates that had any posts at all. This coin has had fewer than that in a month.'],
+  'conviction:too_few_posts': ['not enough posts',
+    'This needs at least 5 scored posts over 24 hours, the same as tone. Below that we have not measured agreement, so calling it mixed or unclear would claim more than we know.']
+};
+
+function reasonRow(label, labelTip, coin, key) {
+  const code = (coin.reasons || {})[key];
+  if (!code) return '';
+  const t = REASON_TEXT[key + ':' + code];
+  if (!t) return '';
+  return dataRow(label, labelTip, t[0], t[1], 'na');
 }
 
 function dataRow(label, labelTip, value, valueTip, extraClass) {
@@ -798,173 +1091,60 @@ function dataRow(label, labelTip, value, valueTip, extraClass) {
   '</div>';
 }
 
-function buildXLink(sym, level) {
-  if (level !== 'Buzzing' && level !== 'Spiking') return '';
+// Shown for Busy and Unusual coins. Keyed on the BAND, not spike_state: a coin at
+// 4.3x its usual accounts is well worth reading, and gating on `state === 'spike'`
+// hid the link for everything below 6x. Steady and Quiet keep no link, since
+// there is little to go and read.
+function buildXLink(sym, band) {
+  if (band !== 'Busy' && band !== 'Unusual') return '';
   const href = 'https://x.com/search?q=%24' + encodeURIComponent(sym) + '&src=typed_query&f=live';
   return '<a class="x-link" href="' + href + '" target="_blank" rel="noopener">See what\'s being said &#x2192;</a>';
 }
 
+// Minutes since this coin's latest cycle closed, measured LIVE.
+//
+// `updated_ago_min` is frozen at payload build time, so rendering it raw drifts
+// from anything that recomputes against Date.now(). That is exactly what made the
+// card show "Latest update 14 min ago" beside "updated 17 min ago" in the status
+// bar: one source, one cycle, two renderings, differing by the payload's own age.
+// Every age on screen now comes from this one function.
+function coinAgeMin(coin) {
+  const agoAtBuild = coin?.updated_ago_min;
+  if (agoAtBuild == null || !currentPayload?.pushed_at) return null;
+  const pushedMs = new Date(currentPayload.pushed_at).getTime();
+  const lastSeenMs = pushedMs - agoAtBuild * 60000;
+  return Math.max(0, Math.round((Date.now() - lastSeenMs) / 60000));
+}
+
+function formatAgo(min) {
+  if (min == null) return '';
+  if (min < 60) return min + ' min ago';
+  const hr = Math.floor(min / 60), rem = min % 60;
+  return rem ? hr + 'h ' + rem + ' min ago' : hr + 'h ago';
+}
+
 function buildUpdatedAgo(coin) {
-  const agoAtBuild = coin.chatter?.updated_ago_min;
-  if (agoAtBuild == null || !currentPayload?.pushed_at) return '';
-  var pushedMs = new Date(currentPayload.pushed_at).getTime();
-  var lastSeenMs = pushedMs - agoAtBuild * 60000;
-  var min = Math.max(0, Math.round((Date.now() - lastSeenMs) / 60000));
-  if (min < 60) return 'updated ' + min + ' min ago';
-  var hr  = Math.floor(min / 60);
-  var rem = min % 60;
-  return rem ? 'updated ' + hr + 'h ' + rem + ' min ago' : 'updated ' + hr + 'h ago';
+  const min = coinAgeMin(coin);
+  return min == null ? '' : 'updated ' + formatAgo(min);
 }
 
-// ── AI narrative ──────────────────────────────────────────────────────
-
-async function fetchNarrative(sym, coinData) {
-  const pushedAt = currentPayload?.pushed_at ?? null;
-  const el = cardAreaEl.querySelector('.narrative-area[data-symbol="' + sym + '"]');
-  if (!el) return;
-
-  function setNarrativeText(container, text) {
-    container.textContent = '';
-    const span = document.createElement('span');
-    span.className = 'narrative-text';
-    span.textContent = text;
-    container.appendChild(span);
-  }
-
-  function setNarrativeLoading(container) {
-    container.textContent = '';
-    const span = document.createElement('span');
-    span.className = 'narrative-loading';
-    span.textContent = 'Analyzing...';
-    container.appendChild(span);
-  }
-
-  // In-memory cache hit
-  if (narrativeCache[sym]) {
-    setNarrativeText(el, narrativeCache[sym]);
-    return;
-  }
-
-  setNarrativeLoading(el);
-
-  // Build the minimal coinData payload - only include sections with ok: true
-  const payload = { symbol: sym, pushedAt };
-  const cd = {};
-  if (coinData.chatter?.ok) cd.chatter = coinData.chatter;
-  if (coinData.volume?.ok)  cd.volume  = coinData.volume;
-  if (coinData.futures?.ok) cd.futures = coinData.futures;
-  payload.coinData = cd;
-
-  try {
-    const res = await fetch('https://instrumetriq.com/api/coin-narrative', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) { el.textContent = ''; return; }
-    const text = (await res.text()).trim();
-    if (!text) { el.textContent = ''; return; }
-    narrativeCache[sym] = text;
-    // Persist to storage so the cache survives popup close/reopen
-    chrome.storage.local.set({
-      narrativeTexts: Object.assign({}, narrativeCache),
-      narrativePushedAt: pushedAt
-    });
-    // Re-check element is still in DOM (user may have navigated away)
-    const live = cardAreaEl.querySelector('.narrative-area[data-symbol="' + sym + '"]');
-    if (live) setNarrativeText(live, text);
-  } catch (_) {
-    // Silent failure - narrative is enhancement only
-    el.textContent = '';
-  }
-}
+// The AI narrative was removed in v2 (decision 2026-07-27). It was generated
+// server-side from the `chatter` AND `futures` blocks and told to interpret "the
+// derivatives signals as a whole" - with futures gone it had no inputs. Its two
+// cache layers are cleared on upgrade by migrateToV2() in background.js.
 
 
-function levelBadgeTooltip(level) {
-  return {
-    Spiking: 'Spiking: chatter is more than 6x above this coin\'s 30-day average. Very unusual activity.',
-    Buzzing: 'Buzzing: chatter is 2-6x above this coin\'s 30-day average. Genuinely elevated attention.',
-    Active:  'Active: chatter is within the normal 0.5-2x range for this coin. No unusual activity.',
-    Quiet:   'Quiet: chatter is below 0.5x this coin\'s 30-day average. Below-average activity.'
-  }[level] ?? '';
-}
 
-function levelValueTooltip(level) {
-  return {
-    Spiking: 'Chatter is more than 6x above this coin\'s 30-day average.',
-    Buzzing: 'Chatter is 2-6x above this coin\'s 30-day average. Genuinely elevated attention.',
-    Active:  'Chatter is within the normal 0.5-2x range for this coin. No unusual activity.',
-    Quiet:   'Chatter is below 0.5x this coin\'s 30-day average. Below-average activity.'
-  }[level] ?? '';
-}
 
-function toneLabel(shift) {
-  if (shift > 16)  return 'Turning positive';
-  if (shift > 8)   return 'Leaning positive';
-  if (shift >= -8)  return 'Steady';
-  if (shift >= -16) return 'Leaning negative';
-  return 'Turning negative';
-}
 
-function toneClass(shift) {
-  if (shift > 8) return 'tone-positive';
-  if (shift >= -8) return 'tone-mixed';
-  return 'tone-negative';
-}
 
-function toneFallbackLabel(raw) {
-  if (raw > 0) return 'Leaning positive';
-  if (raw < 0) return 'Leaning negative';
-  return 'Neutral';
-}
 
-function toneFallbackClass(raw) {
-  if (raw > 10) return 'tone-positive';
-  if (raw < -10) return 'tone-negative';
-  return 'tone-mixed';
-}
 
-function fundingTooltip(label) {
-  return {
-    'Longs paying':  'Longs are paying shorts - more traders are positioned for price to go up.',
-    'Shorts paying': 'Shorts are paying longs - more traders are positioned for price to go down.',
-    'Neutral':       'Funding rate is near zero - no strong directional positioning.'
-  }[label] ?? '';
-}
 
-function oiTooltip(label) {
-  return {
-    'OI rising':  'More contracts were opened in the last hour - new money entering the market.',
-    'OI falling': 'Contracts were closed in the last hour - positions being reduced.',
-    'OI stable':  'Open interest was roughly flat in the last hour - no significant new positioning.'
-  }[label] ?? '';
-}
 
-function whaleTooltip(label) {
-  return {
-    'Whales leaning long':  'Large accounts are positioned unusually long relative to current market norms.',
-    'Whales leaning short': 'Large accounts are positioned unusually short relative to current market norms.',
-    'Neutral':              'Large accounts are positioned within the normal range for current market conditions.'
-  }[label] ?? '';
-}
 
-function volumeTooltip(label) {
-  return {
-    'Elevated':  'Volume is above the 75th percentile of this coin\x27s own 30-day history. Unusual activity.',
-    'Above avg': 'Volume is above the median for this coin over the past 30 days.',
-    'Below avg': 'Volume is below the median for this coin over the past 30 days.',
-    'Low':       'Volume is below the 25th percentile of this coin\x27s own 30-day history. Quieter than usual.'
-  }[label] ?? '';
-}
 
-function qualityStateLabel(quality) {
-  return {
-    insufficient_data: 'Insufficient data',
-    uncertain:         'Uncertain',
-    stale:             'Stale',
-    no_futures:        'No futures data'
-  }[quality] ?? 'Data unavailable';
-}
+
 
 // ── Navigation ────────────────────────────────────────────────────────
 function getCards() {
@@ -982,12 +1162,24 @@ function showCard(i) {
   const sym = cards[currentCardIdx]?.dataset.symbol ?? '';
   if (coinNameEl) coinNameEl.textContent = sym;
   if (counterEl)  counterEl.textContent  = (currentCardIdx + 1) + ' / ' + cards.length;
+  updateStatusBar(sym);
+}
 
-  // Trigger narrative fetch for the now-visible coin
-  if (sym && currentPayload?.coins) {
-    const coinData = currentPayload.coins.find(c => c.symbol === sym);
-    if (coinData) fetchNarrative(sym, coinData);
-  }
+// The status bar is outside .card-area and so is not rebuilt with the cards.
+// It has to be refreshed whenever the visible coin changes, since the freshness
+// stamp is per coin.
+function updateStatusBar(sym) {
+  const el = document.getElementById('status-updated');
+  if (!el) return;
+  const coin = (currentPayload?.coins ?? []).find(c => c.symbol === sym);
+  el.textContent = coin ? buildUpdatedAgo(coin) : '';
+
+  // Mirror the card's state class so the left accent rail runs unbroken from the
+  // card into the bar instead of stopping with a 3px notch.
+  const bar = el.closest('.status-bar');
+  if (!bar) return;
+  const band = coin ? attentionBand(coin.attention?.ratio) : null;
+  bar.className = 'status-bar' + (band ? ' state-' + band.toLowerCase() : '');
 }
 
 // ── Header controls ───────────────────────────────────────────────────
@@ -1021,14 +1213,14 @@ async function onPillClick(opt) {
   opt.classList.add('active');
   badgeMode = opt.textContent.trim() === 'All coins' ? 'all_coins' : 'my_coins';
   await chrome.storage.local.set({ badgeMode });
-  chrome.runtime.sendMessage({ type: 'FETCH_NOW' }); // prompt SW to re-evaluate badge
+  chrome.runtime.sendMessage({ type: 'FETCH_NOW' }, () => void chrome.runtime.lastError); // prompt SW to re-evaluate badge
 }
 
 async function onRefreshClick() {
   refreshBtn.classList.add('spinning');
   refreshBtn.classList.add('cooldown');
   try {
-    const resp = await chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
+    const resp = await chrome.runtime.sendMessage({ type: 'FETCH_NOW' }, () => void chrome.runtime.lastError);
     if (resp?.ok) {
       const { lastPayload } = await chrome.storage.local.get('lastPayload');
       if (lastPayload) {
@@ -1041,9 +1233,33 @@ async function onRefreshClick() {
   setTimeout(() => refreshBtn.classList.remove('cooldown'), 10_000);
 }
 
+// `notifications` is an OPTIONAL permission in v2, so it is not requested at
+// install - it is requested here, in context, the first time someone turns alerts
+// on. Users who never enable alerts never see the prompt.
+//
+// Denial must leave the toggle OFF and storage untouched. A half-enabled state
+// (flag true, permission absent) would silently drop every alert.
 async function onAlertsToggle() {
-  notificationsEnabled = !notificationsEnabled;
   const sw = document.querySelector('.switch-toggle');
+  const turningOn = !notificationsEnabled;
+
+  if (turningOn && chrome.permissions) {
+    let granted = false;
+    try {
+      granted = await chrome.permissions.request({ permissions: ['notifications'] });
+    } catch (_e) {
+      granted = false;
+    }
+    if (!granted) {
+      sw.classList.add('off');
+      sw.classList.remove('on');
+      notificationsEnabled = false;
+      await chrome.storage.local.set({ notificationsEnabled: false });
+      return;
+    }
+  }
+
+  notificationsEnabled = turningOn;
   sw.classList.toggle('on',  notificationsEnabled);
   sw.classList.toggle('off', !notificationsEnabled);
   await chrome.storage.local.set({ notificationsEnabled });
@@ -1053,26 +1269,28 @@ async function onAlertsToggle() {
 function updateFooter() {
   if (!currentPayload) return;
   const coins = currentPayload.coins || [];
-  const n = coins.filter(function(c) { return c.chatter && c.chatter.level === 'Spiking'; }).length;
+  const n = currentPayload?.universe?.spiking ?? 0;
 
   if (isPro) {
     if (footerActiveCountEl) {
-      footerActiveCountEl.textContent = n > 0
-        ? n + ' coins are Spiking right now.'
-        : 'All 250+ coins tracked.';
+      footerActiveCountEl.textContent = universeHeadline(n);
     }
     if (footerCtaEl)     { footerCtaEl.textContent = 'Pro plan active'; footerCtaEl.style.pointerEvents = 'none'; }
     if (footerRestoreEl) footerRestoreEl.classList.add('hidden');
     return;
   }
 
+  // Keep this SHORT and roughly constant in length. The old zero-state read
+  // "Track all 270+ coins and get alerted when one gets busy.", which wrapped to
+  // two lines and shoved the right-hand footer column out of place, and it now
+  // shows often because a silent latest cycle can no longer report a spike.
   if (footerActiveCountEl) {
-    footerActiveCountEl.textContent = n > 0
-      ? n + ' coins are Spiking right now.'
-      : 'Track all 250+ coins to get notified the moment they spike.';
+    footerActiveCountEl.textContent = universeHeadline(n);
   }
+  // Constant text: swapping to "Go Pro" changed the column width whenever the
+  // unusual count crossed zero, which moved the links beside it.
   if (footerCtaEl) {
-    footerCtaEl.textContent = n > 0 ? 'Unlock all 250+ \u2192' : 'Go Pro \u2192';
+    footerCtaEl.textContent = 'Unlock all 270+ \u2192';
     footerCtaEl.style.pointerEvents = '';
   }
   if (footerRestoreEl) footerRestoreEl.classList.remove('hidden');
@@ -1108,10 +1326,9 @@ async function onPickerDone() {
   }
   await chrome.storage.local.set({ trackedCoins });
   render(lastDetectedSymbol);
-  if (!currentPayload) chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
+  if (!currentPayload) chrome.runtime.sendMessage({ type: 'FETCH_NOW' }, () => void chrome.runtime.lastError);
 }
 
-const LEVEL_ORDER = { Spiking: 0, Buzzing: 1, Active: 2, Quiet: 3 };
 
 // Build sorted picker list from payload coins
 function getSortedPickerCoins() {
@@ -1125,16 +1342,11 @@ function getSortedPickerCoins() {
       return a.symbol.localeCompare(b.symbol);
     });
   }
-  // Level sort: target level first, then the rest alphabetically
-  const target = pickerSort.charAt(0).toUpperCase() + pickerSort.slice(1); // e.g. 'spiking' -> 'Spiking'
+  // Activity sort (Pro): continuous attention ratio, descending.
   return coins.sort((a, b) => {
-    const aMatch = (a.chatter?.level === target) ? 0 : 1;
-    const bMatch = (b.chatter?.level === target) ? 0 : 1;
-    if (aMatch !== bMatch) return aMatch - bMatch;
-    // Within same group: sort by level order, then alpha
-    const aOrd = LEVEL_ORDER[a.chatter?.level] ?? 99;
-    const bOrd = LEVEL_ORDER[b.chatter?.level] ?? 99;
-    if (aOrd !== bOrd) return aOrd - bOrd;
+    const ra = a.attention?.ratio ?? -1;
+    const rb = b.attention?.ratio ?? -1;
+    if (rb !== ra) return rb - ra;
     return a.symbol.localeCompare(b.symbol);
   });
 }
@@ -1161,16 +1373,16 @@ function renderPickerList(filter) {
     html += '<input type="checkbox" class="coin-checkbox" data-symbol="' + esc(coin.symbol) + '"' + (isChecked ? ' checked' : '') + ' />';
     html += '<span class="coin-row-symbol">' + esc(coin.symbol) + '</span>';
     html += '</label>';
-    // Pro: show chatter level badge so users can identify active coins in the picker
-    if (isPro && coin.chatter?.ok && coin.chatter.level) {
-      html += '<span class="coin-row-badge ' + coin.chatter.level.toLowerCase() + '">' + esc(coin.chatter.level) + '</span>';
+    // Pro: flag unusual attention so active coins are findable in the picker
+    if (isPro && coin.attention?.state === 'spike') {
+      html += '<span class="coin-row-badge spike">Unusual</span>';
     }
     html += '</div>';
 
     if (isTarget && !upgradeInserted) {
       upgradeInserted = true;
       html += '<div class="upgrade-prompt" id="upgrade-prompt">' +
-        'You\'re tracking 2 coins. <strong>Go Pro to track all 250+</strong>' +
+        'You\'re tracking 2 coins. <strong>Go Pro to track all 270+</strong>' +
         ' &mdash; including <strong>' + activeCount + '</strong> currently active.' +
         ' <a href="#" class="upgrade-link">Upgrade &rarr;</a>' +
         '</div>';
