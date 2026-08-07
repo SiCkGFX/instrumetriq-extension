@@ -10,31 +10,32 @@ data/coins_v2/
 data/_baseline/
 # Pipeline completion markers
 data/.last_*
+data/query_changed_coins.json
 # Cron log output
 logs/
 # Local build artifacts
 *.zip
 
-# ── Internal-only files (not for public repo) ────────────────────────────────
-# Internal product spec
-EXTENSION_PLAN.md
-# Internal development changelog
+# ── Internal-only docs ───────────────────────────────────────────────────────
+# Everything internal now lives under docs/: plans/, releases/, archive/, plus
+# the pipeline and schema references. One rule covers the lot.
+docs/
+# Engineering log, kept at root beside the public CHANGELOG
 DEVLOG.md
-# Internal dev instructions
+# Safety net: a plan file recreated at root stays out of the public repo
+*_PLAN.md
+# Agent working instructions
+CLAUDE.md
 .github/copilot-instructions.md
-# Pipeline scripts with VPS paths
+
+# ── Pipeline scripts with VPS paths ──────────────────────────────────────────
 scripts/backfill_csvs.py
 scripts/update_csvs.py
 scripts/ingest_buckets.py
 # Pipeline data used by excluded scripts
 scripts/coin_universe.json
-# Internal pipeline and archive docs
-docs/
-# Internal migration planning
-DATASWEEP_MIGRATION_PLAN.md
-SENTIMENT_MAKEOVER_PLAN.md
-# Internal infrastructure & AI implementation
-AI_NARRATIVE_IMPLEMENTATION.md
+
+# ── Server config ────────────────────────────────────────────────────────────
 nginx/
 
 # ── Source assets not needed in repo ─────────────────────────────────────────
@@ -42,6 +43,12 @@ extension/icons/instrumetriq-avatar.jpg
 extension/icons/Screenshot*
 promo-tile-*.jpg
 promo-tile-*.png
+
+# ── Screenshot harness: browser + outputs, see tools/screenshot/README.md ─────
+tools/screenshot/chrome/
+tools/screenshot/build/
+tools/screenshot/out/
+tools/screenshot/store/
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
@@ -57,13 +64,3 @@ scripts/_test_*
 .DS_Store
 *.swp
 *.swo
-
-# ── Agent working instructions (not repo content) ─────────────────────────────
-CLAUDE.md
-data/query_changed_coins.json
-RELEASE_2.0.0.md
-tools/screenshot/build/
-tools/screenshot/out/
-tools/screenshot/store/
-# Chrome for Testing, downloaded per the setup steps in tools/screenshot/README.md
-tools/screenshot/chrome/
