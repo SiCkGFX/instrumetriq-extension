@@ -26,8 +26,10 @@ CHROME = os.environ.get("CHROMIUM") or str(HERE / "chrome/chrome-linux64/chrome"
 
 # number, name, cutoff for as_of, coin, harness query
 SHOTS = [
+    # Pro, so the first listing image is not a locked free tier. The free-tier
+    # story is already told by shot 10, which shows the picker and its limit.
     ("07", "unusual-positive", "2026-08-06T15:20Z", "IMX",
-     "theme=dark", "Unusual attention, positive tone"),
+     "theme=dark&pro=1", "Unusual attention, positive tone, Pro"),
     ("08", "busy-negative",    "2026-08-06T15:20Z", "CKB",
      "theme=dark&alerts=1", "Busy, negative tone, alerts on"),
     ("09", "unusual-light",    "2026-08-03T13:31Z", "CAKE",

@@ -3,7 +3,7 @@
 **What people on X (Twitter) are actually saying about crypto, right in your browser.**
 
 Instrumetriq is a Chrome and Firefox extension that describes the conversation around
-270+ coins: how many accounts are posting, in what proportion of positive to negative,
+250+ coins: how many accounts are posting, in what proportion of positive to negative,
 about what, and how that compares with each coin's own normal. Open any supported
 exchange or coin page, click the icon, and read it without leaving your tab.
 
@@ -91,7 +91,7 @@ Light, dark, or follow the system.
 
 **Free** - 2 tracked coins, all features included, no time limit.
 
-**Pro** - all 270+ coins. Monthly ($5/mo) or yearly ($45/yr, save 25%). Payment
+**Pro** - all 250+ coins. Monthly ($5/mo) or yearly ($45/yr, save 25%). Payment
 handled by Stripe via ExtensionPay. No account creation needed - just an email for
 the receipt.
 

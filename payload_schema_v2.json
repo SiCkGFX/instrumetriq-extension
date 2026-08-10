@@ -6,6 +6,7 @@
   "required": [
     "schema_version",
     "pushed_at",
+    "cycle_id",
     "feed_ok",
     "cycle_minutes_approx",
     "universe",
@@ -589,6 +590,37 @@
           }
         }
       }
+    },
+    "cycle_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Identifier of the newest collection cycle in the payload. Shared by every coin. Use equality against the previous value as the exact 'is this new data' test; pushed_at changes on every build (~every 10 min) even when the numbers are unchanged."
+    },
+    "feed_state": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "late",
+        "interrupted"
+      ],
+      "description": "Feed freshness tier, derived from cycle_minutes_approx. 'late' past FEED_WARN_CYCLES (2) cycles, 'interrupted' past FEED_INTERRUPT_CYCLES (6). Clients render 'late' as a notice while keeping data visible."
+    },
+    "feed_age_min": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Minutes since the newest collection, across all coins. Null only when no coin carries a timestamp."
+    },
+    "feed_warn_after_min": {
+      "type": "integer",
+      "description": "Age at which feed_state becomes 'late'. 2 x cycle_minutes_approx."
+    },
+    "feed_interrupt_after_min": {
+      "type": "integer",
+      "description": "Age at which feed_state becomes 'interrupted'. 6 x cycle_minutes_approx. feed_ok is false at and beyond this."
     }
   }
 }

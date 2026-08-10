@@ -61,8 +61,8 @@ DEFAULT_BG = {"11": str(HERE / "backdrop.png")}
 
 CAPTIONS = {
     "07": ("Unusual attention",
-           "When a coin draws far more posting accounts than its own normal, "
-           "it is flagged and colour-coded. Everything below the chart covers "
+           "When a coin draws far more posting accounts than its own normal, the "
+           "reading and the scale turn amber. Everything below the chart covers "
            "the same 24 hours.",
            "amber"),
     "08": ("Tone, not direction",

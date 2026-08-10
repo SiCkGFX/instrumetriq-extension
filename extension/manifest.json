@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instrumetriq - Crypto Sentiment & Market Pulse",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "See which crypto coins are suddenly drawing unusual conversation on X, and what people are saying about them.",
   "action": {
     "default_popup": "popup.html",

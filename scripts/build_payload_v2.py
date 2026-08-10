@@ -43,6 +43,7 @@ DATA_DIR   = SCRIPT_DIR.parent / "data"
 # a second implementation of any metric. Unset in production.
 COINS_DIR  = Path(os.environ.get("COINS_DIR_V2", DATA_DIR / "coins_v2"))
 UNIVERSE   = SCRIPT_DIR / "coin_universe.json"
+COIN_NAMES = SCRIPT_DIR / "coin_names.json"
 
 UPDATE_MARKER = DATA_DIR / ".last_update_ts_v2"
 BUILD_MARKER  = DATA_DIR / ".last_build_ts_v2"
@@ -50,8 +51,18 @@ BUILD_MARKER  = DATA_DIR / ".last_build_ts_v2"
 OUTPUT_PATH = Path(os.environ.get(
     "PAYLOAD_V2_PATH", "/var/www/instrumetriq-api/data/extension_payload_v2.json"))
 
-BUILDER_VERSION    = "2.0.0"
-FEED_INTERRUPTED_H = 6
+BUILDER_VERSION    = "2.0.1"
+FEED_INTERRUPTED_H = 6      # legacy, retained only for the per-coin `quality` flag
+
+# Feed staleness as MULTIPLES OF A CYCLE, not wall-clock hours. The old 6-hour
+# constant was really "~2 cycles" when cycles ran 2.5-3h; hardcoding any hour
+# figure re-freezes today's cadence and drifts again the next time it changes.
+FEED_WARN_CYCLES      = 2   # data shown, strip carries a notice
+FEED_INTERRUPT_CYCLES = 6   # existing hard banner, card replaced
+# Used only when the cadence cannot be measured, which happens when no row falls
+# in the 24h sampling window, i.e. an outage longer than a day. Matches the
+# client-side fallback at popup.js:819 so both sides degrade identically.
+CYCLE_FALLBACK_MIN    = 50
 SPARK_FULL_DAYS    = 8      # full cycle resolution for this many days; older thinned to ~1/day
 LOUDEST_N          = 8
 LOUDEST_MIN_POSTS  = 10     # absolute floor: without it the ranking fills with 1-post microcaps
@@ -157,6 +168,21 @@ def load_query_changed():
         except (TypeError, ValueError):
             continue
     return out
+
+
+def load_names():
+    """Display names, symbol -> name. Absent symbols fall back to the bare symbol.
+
+    Deliberately partial: a coin whose name equals its symbol carries no entry, so
+    the card shows "AAVE" rather than "AAVE Aave". Same for any coin whose name
+    could not be confirmed against a second source, since a wrong name published
+    beside a symbol is worse than no name.
+    """
+    try:
+        d = json.loads(COIN_NAMES.read_text())
+        return {k: v for k, v in d.items() if isinstance(v, str) and v.strip()}
+    except Exception:
+        return {}
 
 
 def load_pairs():
@@ -565,10 +591,24 @@ def build(output_path):
     now = (datetime.strptime(_asof, "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
            if _asof else datetime.now(timezone.utc))
     pairs = load_pairs()
+    names = load_names()
 
+    # The coin list is the CSV directory, gated by the universe. Without the gate,
+    # a delisted or renamed coin keeps being published for ~30 days: ingest writes a
+    # CSV for every symbol present in the twscrape buckets, and old buckets still
+    # carry the retired symbols long after upstream drops them. Deleting the CSV does
+    # not help either, ingest recreates it on the next run.
+    #
+    # The gate is skipped entirely if the universe cannot be read, because publishing
+    # a partial universe is worse than publishing a stale one.
+    universe = set(pairs)
     all_rows = {}
+    excluded = []
     for path in sorted(COINS_DIR.glob("*.csv")):
         sym = path.stem
+        if universe and sym not in universe:
+            excluded.append(sym)
+            continue
         with open(path, newline="") as fh:
             rows = list(csv.DictReader(fh))
         for r in rows:
@@ -578,12 +618,22 @@ def build(output_path):
     if not all_rows:
         log.error("No CSVs in %s - refusing to write an empty payload", COINS_DIR)
         return False
-    log.info("Read %d coin CSVs", len(all_rows))
+    if not universe:
+        log.warning("Coin universe unavailable - publishing every CSV found, ungated")
+    log.info("Read %d coin CSVs (%d excluded, not in universe: %s)",
+             len(all_rows), len(excluded), ", ".join(excluded) or "-")
 
     query_changed = load_query_changed()
     log.info("Query-changed coins (population discontinuity): %d", len(query_changed))
     coins = [c for c in (build_coin(s, r, pairs, now, query_changed.get(s))
                          for s, r in all_rows.items()) if c]
+    named = 0
+    for c in coins:
+        n = names.get(c["symbol"])
+        if n:
+            c["name"] = n
+            named += 1
+    log.info("Display names attached: %d of %d coins", named, len(coins))
 
     # Volume percentile across coins (a coin's label is its rank in the universe).
     vols = sorted(c["market"]["volume_usd"] for c in coins
@@ -648,10 +698,51 @@ def build(output_path):
     cycle_min = int(5 * round(statistics.median(gaps) / 5)) if gaps else None
 
     latest_day = max((c["day"] for c in coins if c.get("day")), default=None)
+
+    # Newest cycle the CSVs carry. Every coin shares one cycle_id per cycle, so a
+    # single envelope value describes the whole payload (enumerated 2026-08-08 over
+    # cycles 5806-6608: 803 cycles, none spanning more than one timestamp, and the
+    # newest cycle_id identical across all 278 coins).
+    #
+    # Consumers need this because `pushed_at` cannot answer "is this new data". The
+    # builder runs every 10 minutes but the feed produces a cycle roughly every 55,
+    # so most builds republish identical numbers under a fresh pushed_at. Comparing
+    # cycle_id is an exact equality test; comparing pushed_at is not.
+    cycle_ids = [
+        int(cid) for rows in all_rows.values() if rows
+        for cid in [str(rows[-1].get("cycle_id") or "").strip()] if cid.isdigit()
+    ]
+    cycle_id = max(cycle_ids) if cycle_ids else None
+
+    # Staleness, in cycles rather than hours. `cycle_min` is measured from gaps
+    # between EXISTING rows (see :642-648), so an ongoing outage never enters the
+    # sample: the median holds its normal value exactly while the feed is down,
+    # which is when the thresholds most need to be tight. On recovery one large
+    # gap joins ~27 others in the 24h window and the median absorbs it.
+    cyc = cycle_min if cycle_min else CYCLE_FALLBACK_MIN
+    warn_after      = FEED_WARN_CYCLES * cyc
+    interrupt_after = FEED_INTERRUPT_CYCLES * cyc
+    if freshest is None:
+        feed_state = "interrupted"
+    elif freshest > interrupt_after:
+        feed_state = "interrupted"
+    elif freshest > warn_after:
+        feed_state = "late"
+    else:
+        feed_state = "ok"
+
     payload = {
         "schema_version": 2,
         "pushed_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "feed_ok": freshest is not None and freshest <= FEED_INTERRUPTED_H * 60,
+        "cycle_id": cycle_id,
+        # `feed_ok` keeps its original meaning, false ONLY at the hard tier, so
+        # 2.0.0 clients and the pulse page behave exactly as before. The new tier
+        # rides alongside it rather than redefining it.
+        "feed_ok": feed_state != "interrupted",
+        "feed_state": feed_state,
+        "feed_age_min": freshest,
+        "feed_warn_after_min": warn_after,
+        "feed_interrupt_after_min": interrupt_after,
         "cycle_minutes_approx": cycle_min,
         "builder_version": BUILDER_VERSION,
         "universe": {

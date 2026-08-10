@@ -1791,6 +1791,16 @@ strong.tone-mixed    { color: var(--text-secondary); }
   color: var(--text-primary);
 }
 
+/* Feed stale. Amber, the same token the Unusual band uses, because both mean
+   "worth your attention" rather than "something is broken". The second line sits
+   in the secondary colour so the age stays the one thing that draws the eye. */
+.uni-late-val { color: var(--accent-amber); }
+.uni-late-dim {
+  flex: 1 1 auto;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
 .uni-chips {
   flex: 1 1 auto;
   display: flex;
@@ -1903,6 +1913,28 @@ button.uni-chip:hover { color: var(--accent-cyan); }
   color: var(--text-muted);
   font-size: 10px;
   margin-left: 4px;
+}
+
+/* Coin display name, same treatment as .row-age. Truncates rather than wraps:
+   the longest is 37 chars ("Artificial Superintelligence Alliance") and the
+   header shares its row with the state badge, so a wrap would push the badge
+   onto a second line and move every row below it. */
+.coin-name {
+  color: var(--text-muted);
+  /* 13px, ~30% up from the 10px of .row-age. The grey already keeps it behind the
+     symbol, so the size can carry legibility without competing for attention. */
+  font-size: 13px;
+  margin-left: 6px;
+  /* The header is space-between, so without this the name is pushed to the far
+     right and reads as a separate column. `margin-right: auto` makes the name
+     absorb the free space instead, so it sits against the symbol the way the age
+     sits against "Latest update", and the badge still lands hard right. */
+  margin-right: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rows-divider {

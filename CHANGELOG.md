@@ -10,6 +10,37 @@ Instrumetriq v2 is a different product from v1. v1 showed a chatter meter alongs
 funding, open interest and whale positioning. v2 describes the conversation itself, who is talking, in what proportion of positive to negative, about what, and drops
 the derivatives readouts.
 
+## [2.0.1] - 2026-08-10
+
+### Added
+- Coin names now sit beside the symbol on the card, in small grey type. FET reads
+  "Artificial Superintelligence Alliance", ACT reads "Act I : The AI Prophecy". Coins
+  whose name is simply their symbol, such as BNB, show the symbol alone rather than
+  repeating it.
+- When the feed is running late, the top of the popup says so, with the age of the
+  newest collection. It appears once the data is older than two collection cycles and
+  the readings stay visible and usable underneath. Previously nothing was shown until
+  six hours had passed, at which point the whole card was replaced.
+
+### Changed
+- Coin list updated to match the exchange. TON is now GRAM and OM is now MANTRA,
+  following their renames. Six coins that no longer trade have been removed: A2Z,
+  CHESS, DF, FUN, IDEX and UTK. Opening a page for a renamed coin still finds it,
+  since the old addresses map to the new symbol.
+- The renamed coins start their history fresh rather than carrying the old symbol's,
+  because the old and new readings are not measuring the same thing. Both show no
+  attention reading until they have enough of their own history to compare against.
+- The card header now reads the same on every coin. The "UNUSUAL" tag that used to
+  sit on the right of that row is gone; the activity scale directly below already
+  names the level for every coin and colours it, so the tag repeated one word for one
+  coin in seven and left the row unbalanced on the rest.
+- Copy that referred to "270+ coins" now says "250+". The tracked list shrinks as coins
+  are delisted, and the exact figure is on screen anyway in the market strip at the top.
+- The point at which the feed counts as late or interrupted now follows the actual
+  collection cadence instead of a fixed number of hours. The old six-hour figure was
+  chosen when collections ran every two to three hours, and it did not move when they
+  became faster.
+
 ## [2.0.0] - 2026-08-07
 
 ### Added

@@ -426,6 +426,60 @@ function renderUniverse() {
 
   var html = '';
 
+  // Feed running late. Sits where "Market conversation" normally does, because
+  // staleness is a GLOBAL property (every coin shares one collection cycle) and
+  // this row is the only global-scope line in the popup. Replacing it rather than
+  // adding a fourth banner keeps the card visible and usable.
+  //
+  // Only the middle tier renders here. `feed_state: "interrupted"` is caught
+  // earlier by the feed_ok branch, which replaces the card area entirely.
+  // Feed running late. Takes over the WHOLE strip, because every line in it is a
+  // present-tense claim: "Busiest now", "24 coins busier than usual", "263 active".
+  // Those describe the newest collection, so once it is hours old they are false as
+  // written, and the fix is to stop saying them rather than to caveat them.
+  //
+  // Replacing this strip and nothing else is deliberate: the coin card below stays
+  // visible and usable, and every figure on it already carries its own collection
+  // time. The strip returns intact the moment the feed catches up.
+  //
+  // BOTH stale tiers, not just the middle one. `interrupted` also has to suppress
+  // this strip: the card below is already replaced by the unavailable banner, and
+  // leaving "Busiest now" above it stated the loudest coins as current while the
+  // popup was simultaneously saying it had no current data.
+  const fs = currentPayload?.feed_state;
+  if (fs === 'late' || fs === 'interrupted') {
+    const age = feedAgeText(currentPayload.feed_age_min);
+    const cyc = currentPayload.cycle_minutes_approx ?? 50;
+    // Same THREE components as the normal strip, two .uni-row plus one .uni-stats,
+    // so the replacement is the same height by construction. Collapsing it to one
+    // line shifted the coin card up and moved every control below it.
+    //
+    // The two tiers say different things, and the interrupted one deliberately does
+    // NOT repeat "will recover automatically" because the banner replacing the card
+    // already says exactly that. This strip carries the age and the reason the
+    // readings are gone; the banner carries the reassurance.
+    const rows = fs === 'late'
+      ? ['Feed running behind', 'collects every ~' + cyc + ' min',
+         'Readings below are unchanged until collection resumes.']
+      : ['Collection stopped', 'no data for ' + Math.floor(currentPayload.feed_age_min / cyc) + '+ cycles',
+         'Readings hidden rather than shown out of date.'];
+    setHTML(el,
+      '<div class="uni-row" data-tooltip="' +
+        esc('Newest collection is ' + age + ' old. The feed normally collects every ' +
+            'about ' + cyc + ' minutes.') + '">' +
+        '<span class="uni-label">Latest data</span>' +
+        '<span class="uni-value uni-late-val">' + esc(age + ' old') + '</span>' +
+      '</div>' +
+      '<div class="uni-row">' +
+        '<span class="uni-label">' + esc(rows[0]) + '</span>' +
+        '<span class="uni-value uni-late-dim">' + esc(rows[1]) + '</span>' +
+      '</div>' +
+      '<div class="uni-row uni-stats">' +
+        '<span class="uni-stat">' + esc(rows[2]) + '</span>' +
+      '</div>');
+    return;
+  }
+
   // Market pulse - a trailing DAILY average, never the latest cycle. It moves
   // ~1.4 points a day, so it reads as ambient context, not a headline.
   const mk = u.market;
@@ -619,12 +673,13 @@ function buildTeaserCardHtml(symbol, coin, visClass) {
     ctaText = isHot
       ? esc(symbol) + ' is getting unusual attention. '
       : '';
-    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 270+ coins.</a>' +
+    ctaText += '<a href="#" class="upgrade-link">Go Pro to track ' + esc(symbol) + ' and all 250+ coins.</a>' +
       '<br><span class="teaser-hint">Or press <strong>Edit</strong> to replace one of your tracked coins.</span>';
   }
   return '<div class="card teaser-card ' + visClass + '" data-symbol="' + esc(symbol) + '">' +
     '<div class="card-header">' +
       '<span class="coin-symbol">' + esc(symbol) + '</span>' +
+      coinNameHtml(coin) +
       badgeHtml +
     '</div>' +
     '<p class="teaser-cta">' + ctaText + '</p>' +
@@ -653,7 +708,7 @@ function universeHeadline(spiking) {
   if (busy > 0) {
     return busy + (busy === 1 ? ' coin is' : ' coins are') + ' busier than usual.';
   }
-  return tracked ? 'Tracking ' + tracked + ' coins.' : 'Tracking 270+ coins.';
+  return tracked ? 'Tracking ' + tracked + ' coins.' : 'Tracking 250+ coins.';
 }
 
 function attentionBand(ratio) {
@@ -693,15 +748,20 @@ function buildNormalCardHtml(coin, visClass) {
   // market behaviour. Hedging such a sentence does not undo the link it draws,
   // and it was the one place the extension connected a social count to anything
   // outside the conversation. Keep this text about posting.
-  const badgeHtml = state === 'spike'
-    ? '<span class="level-badge spike" data-tooltip="' +
-        esc('Unusually many accounts are posting about this coin, at least 6x its own recent median. That describes the conversation, not the price.') +
-        '">UNUSUAL</span>'
-    : '';
+  // No badge on the normal card. The scale strip directly below already names the
+  // band for EVERY coin and colours it (amber for Unusual, cyan for Busy, see
+  // popup.css:528-531), so a badge repeated the word for one state in seven and
+  // left the header visibly lop-sided on the other 264. The amber in the scale is
+  // what draws the eye; the badge was not adding a signal, only asymmetry.
+  //
+  // The teaser card keeps its badge: it has no scale strip, so there the badge is
+  // the only place the band appears.
+  const badgeHtml = '';
 
   return '<div class="card ' + stCls + ' ' + visClass + '" data-symbol="' + esc(sym) + '">' +
     '<div class="card-header">' +
       '<span class="coin-symbol">' + esc(sym) + '</span>' +
+      coinNameHtml(coin) +
       badgeHtml +
     '</div>' +
     buildScaleHtml(band) +
@@ -1128,6 +1188,23 @@ function buildUpdatedAgo(coin) {
   return min == null ? '' : 'updated ' + formatAgo(min);
 }
 
+// Display name beside the symbol, styled like the "1h 58 min ago" beside "Latest
+// update": small and muted, so the symbol stays the thing you read first. Absent
+// for the ~18 coins whose name is their symbol, which is why this returns ''.
+function coinNameHtml(coin) {
+  const n = coin && coin.name;
+  return n ? '<span class="coin-name">' + esc(n) + '</span>' : '';
+}
+
+// Same shape as formatAgo without the trailing "ago", because the staleness row
+// reads "2h 10m old, longer than usual" and "2h 10 min ago old" does not parse.
+function feedAgeText(min) {
+  if (min == null) return 'unknown age';
+  if (min < 60) return min + ' min';
+  const hr = Math.floor(min / 60), rem = min % 60;
+  return rem ? hr + 'h ' + rem + 'm' : hr + 'h';
+}
+
 // The AI narrative was removed in v2 (decision 2026-07-27). It was generated
 // server-side from the `chatter` AND `futures` blocks and told to interpret "the
 // derivatives signals as a whole" - with futures gone it had no inputs. Its two
@@ -1281,7 +1358,7 @@ function updateFooter() {
   }
 
   // Keep this SHORT and roughly constant in length. The old zero-state read
-  // "Track all 270+ coins and get alerted when one gets busy.", which wrapped to
+  // "Track all 250+ coins and get alerted when one gets busy.", which wrapped to
   // two lines and shoved the right-hand footer column out of place, and it now
   // shows often because a silent latest cycle can no longer report a spike.
   if (footerActiveCountEl) {
@@ -1290,7 +1367,7 @@ function updateFooter() {
   // Constant text: swapping to "Go Pro" changed the column width whenever the
   // unusual count crossed zero, which moved the links beside it.
   if (footerCtaEl) {
-    footerCtaEl.textContent = 'Unlock all 270+ \u2192';
+    footerCtaEl.textContent = 'Unlock all 250+ \u2192';
     footerCtaEl.style.pointerEvents = '';
   }
   if (footerRestoreEl) footerRestoreEl.classList.remove('hidden');
@@ -1382,7 +1459,7 @@ function renderPickerList(filter) {
     if (isTarget && !upgradeInserted) {
       upgradeInserted = true;
       html += '<div class="upgrade-prompt" id="upgrade-prompt">' +
-        'You\'re tracking 2 coins. <strong>Go Pro to track all 270+</strong>' +
+        'You\'re tracking 2 coins. <strong>Go Pro to track all 250+</strong>' +
         ' &mdash; including <strong>' + activeCount + '</strong> currently active.' +
         ' <a href="#" class="upgrade-link">Upgrade &rarr;</a>' +
         '</div>';
